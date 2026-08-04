@@ -30,13 +30,18 @@ const css = cssHrefs.map(read).join('\n')
 // A literal </script> inside a JS string would close the tag early.
 const js = jsHrefs.map(read).join('\n').replace(/<\/script/g, '<\\/script')
 
+/* Lifted out of the built index.html rather than repeated here. This file had
+   its own copy of the title and it silently kept the old name through a rename
+   — a second source of truth is a second thing to forget. */
+const title = html.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? 'Before &amp; After'
+
 const page = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0c0c0e" />
-    <title>Unbklok — Detail Photo Studio</title>
+    <title>${title}</title>
     <style>
 ${css}
     </style>
