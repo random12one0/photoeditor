@@ -338,6 +338,233 @@ export function qualityFromImageData(img: ImageData): number {
   return Math.max(0, Math.min(1, focusScore * 0.75 + exposure * 0.25))
 }
 
+/* ------------------------------------------------------- colour presence */
+
+/**
+ * How many bins one region's colour histogram uses.
+ *
+ * 12 hues x 2 saturations x 2 values for anything with a colour in it, plus 4
+ * for the greys. Hue is meaningless once a pixel is nearly grey or nearly
+ * black — the angle is still defined but it is noise — so those pixels go in
+ * their own bins by brightness instead of contaminating a hue.
+ */
+const HUE_BINS = 12
+const CHROMATIC_BINS = HUE_BINS * 2 * 2
+const GREY_BINS = 4
+export const COLOR_HIST_BINS = CHROMATIC_BINS + GREY_BINS
+
+/** Global histogram, then one per quadrant. */
+export const COLOR_HIST_REGIONS = 5
+
+function accumulateHsv(
+  out: Float64Array,
+  base: number,
+  r: number,
+  g: number,
+  b: number,
+): void {
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const v = max / 255
+  const s = max === 0 ? 0 : (max - min) / max
+
+  if (s < 0.18 || v < 0.15) {
+    // Grey, or too dark for its hue to mean anything.
+    const bin = Math.min(GREY_BINS - 1, Math.floor(v * GREY_BINS))
+    out[base + CHROMATIC_BINS + bin]++
+    return
+  }
+
+  const d = max - min
+  let h: number
+  if (max === r) h = ((g - b) / d + 6) % 6
+  else if (max === g) h = (b - r) / d + 2
+  else h = (r - g) / d + 4
+  h /= 6
+
+  const hb = Math.min(HUE_BINS - 1, Math.floor(h * HUE_BINS))
+  const sb = s < 0.45 ? 0 : 1
+  const vb = v < 0.5 ? 0 : 1
+  out[base + (hb * 2 + sb) * 2 + vb]++
+}
+
+/**
+ * Which colours are present, and roughly where.
+ *
+ * This exists because averaging colour throws away the thing that matters. The
+ * chromaticity signature elsewhere in this file takes the *mean* colour of each
+ * cell, which answers "what colour is this region" — and a wheel on grass
+ * averages out to much the same grey-green as a grey car seat. Measured on real
+ * photographs, a wheel scored higher against a car boot than against the same
+ * wheel after washing.
+ *
+ * A histogram answers a different and more useful question: does this photo
+ * contain any of this colour at all? The wheel shots have bright green grass in
+ * the corners. The interior shots contain no green anywhere. That difference
+ * survives averaging only if you never average.
+ *
+ * Compared by histogram intersection, which is Swain and Ballard's colour
+ * indexing (1991) — chosen because it degrades gracefully when part of a scene
+ * is occluded or reframed, which is exactly what happens between a before and
+ * an after taken ninety minutes apart from a slightly different spot.
+ *
+ * Layout: the whole frame first, then the four quadrants, so a caller can ask
+ * both "are these the same colours" and "are they in the same places".
+ */
+export function colorHistogram(img: ImageData): number[] {
+  const { width: w, height: h, data } = img
+  const out = new Float64Array(COLOR_HIST_REGIONS * COLOR_HIST_BINS)
+  const counts = new Float64Array(COLOR_HIST_REGIONS)
+
+  for (let y = 0; y < h; y++) {
+    const qy = y < h / 2 ? 0 : 1
+    for (let x = 0; x < w; x++) {
+      const p = (y * w + x) * 4
+      const r = data[p]
+      const g = data[p + 1]
+      const b = data[p + 2]
+      const quadrant = 1 + qy * 2 + (x < w / 2 ? 0 : 1)
+
+      accumulateHsv(out, 0, r, g, b)
+      counts[0]++
+      accumulateHsv(out, quadrant * COLOR_HIST_BINS, r, g, b)
+      counts[quadrant]++
+    }
+  }
+
+  const result = new Array<number>(out.length)
+  for (let region = 0; region < COLOR_HIST_REGIONS; region++) {
+    const n = counts[region] || 1
+    for (let i = 0; i < COLOR_HIST_BINS; i++) {
+      const idx = region * COLOR_HIST_BINS + i
+      // Four decimals: bins are fractions of a region and most are near zero.
+      result[idx] = Math.round((out[idx] / n) * 10000) / 10000
+    }
+  }
+  return result
+}
+
+/**
+ * Histogram intersection: the fraction of one distribution also present in the
+ * other. 1 is identical, 0 shares no colour at all.
+ */
+function intersect(a: number[], b: number[], offset: number, len: number): number {
+  let sum = 0
+  for (let i = 0; i < len; i++) {
+    const x = a[offset + i]
+    const y = b[offset + i]
+    sum += x < y ? x : y
+  }
+  return sum
+}
+
+/**
+ * Colour agreement, 0-1: the whole frame, then where those colours sit.
+ *
+ * The global term is weighted more heavily than the quadrants because a before
+ * and an after are not framed identically — insisting the green be in the same
+ * corner would undo the robustness the histogram was chosen for.
+ */
+export function colorHistogramSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0
+  const global = intersect(a, b, 0, COLOR_HIST_BINS)
+  let quads = 0
+  for (let q = 1; q < COLOR_HIST_REGIONS; q++) {
+    quads += intersect(a, b, q * COLOR_HIST_BINS, COLOR_HIST_BINS)
+  }
+  return global * 0.6 + (quads / (COLOR_HIST_REGIONS - 1)) * 0.4
+}
+
+/* ------------------------------------------------------------ edge texture */
+
+/** 4 orientations plus a non-directional bin, over a 4x4 grid, plus a global. */
+const EDGE_ORIENTATIONS = 5
+const EDGE_BLOCKS = 4
+export const EDGE_HIST_LENGTH = (EDGE_BLOCKS * EDGE_BLOCKS + 1) * EDGE_ORIENTATIONS
+
+/**
+ * What kind of edges are where — MPEG-7's Edge Histogram Descriptor, near
+ * enough.
+ *
+ * Colour says a wheel is not a car seat because of the grass. Edges say it for
+ * a different reason: a wheel is radial spokes and dense tread lettering, and a
+ * seat is soft fabric with almost no strong edge in it. Two independent reasons
+ * to separate them is the point — the failure being fixed here was two
+ * different subjects agreeing on a single weak signal.
+ *
+ * Per block, every pixel's gradient is sorted into one of four orientations, or
+ * into a fifth bin when it is too weak to have a direction. Weighted by
+ * magnitude, so a faint gradient in a flat region can't outvote a real edge, and
+ * normalised per block so it describes texture rather than contrast.
+ */
+export function edgeHistogram(img: ImageData): number[] {
+  const { width: w, height: h } = img
+  const gray = toGrayGrid(img.data, w, h)
+  const out = new Float64Array(EDGE_HIST_LENGTH)
+  const blockTotals = new Float64Array(EDGE_BLOCKS * EDGE_BLOCKS)
+
+  // Below this, a gradient is sensor noise rather than an edge.
+  const WEAK = 12
+
+  for (let y = 1; y < h - 1; y++) {
+    const by = Math.min(EDGE_BLOCKS - 1, Math.floor((y / h) * EDGE_BLOCKS))
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x
+      const gx = gray[i + 1] - gray[i - 1]
+      const gy = gray[i + w] - gray[i - w]
+      const mag = Math.hypot(gx, gy)
+      const bx = Math.min(EDGE_BLOCKS - 1, Math.floor((x / w) * EDGE_BLOCKS))
+      const block = by * EDGE_BLOCKS + bx
+
+      let bin: number
+      if (mag < WEAK) {
+        bin = 4
+      } else {
+        // 0..pi, folded: an edge has no up or down.
+        const angle = ((Math.atan2(gy, gx) + Math.PI) % Math.PI) / Math.PI
+        bin = Math.min(3, Math.floor(angle * 4))
+      }
+      const weight = mag < WEAK ? 1 : mag
+      out[block * EDGE_ORIENTATIONS + bin] += weight
+      blockTotals[block] += weight
+    }
+  }
+
+  const result = new Array<number>(EDGE_HIST_LENGTH).fill(0)
+  const globalBase = EDGE_BLOCKS * EDGE_BLOCKS * EDGE_ORIENTATIONS
+  for (let block = 0; block < EDGE_BLOCKS * EDGE_BLOCKS; block++) {
+    const n = blockTotals[block] || 1
+    for (let bin = 0; bin < EDGE_ORIENTATIONS; bin++) {
+      const v = out[block * EDGE_ORIENTATIONS + bin] / n
+      result[block * EDGE_ORIENTATIONS + bin] = Math.round(v * 10000) / 10000
+      result[globalBase + bin] += v / (EDGE_BLOCKS * EDGE_BLOCKS)
+    }
+  }
+  for (let bin = 0; bin < EDGE_ORIENTATIONS; bin++) {
+    result[globalBase + bin] = Math.round(result[globalBase + bin] * 10000) / 10000
+  }
+  return result
+}
+
+/**
+ * Edge agreement, 0-1.
+ *
+ * The global part is weighted heavily for the same reason as with colour: the
+ * two photos are not framed identically, so insisting that the tread be in the
+ * same block would throw away more than it gains.
+ */
+export function edgeHistogramSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0
+  const globalBase = EDGE_BLOCKS * EDGE_BLOCKS * EDGE_ORIENTATIONS
+  const global = intersect(a, b, globalBase, EDGE_ORIENTATIONS)
+
+  let blocks = 0
+  for (let block = 0; block < EDGE_BLOCKS * EDGE_BLOCKS; block++) {
+    blocks += intersect(a, b, block * EDGE_ORIENTATIONS, EDGE_ORIENTATIONS)
+  }
+  return global * 0.5 + (blocks / (EDGE_BLOCKS * EDGE_BLOCKS)) * 0.5
+}
+
 export function meanLuma(img: ImageData): number {
   const d = img.data
   let sum = 0
@@ -353,29 +580,68 @@ export interface Fingerprint {
   chromaSig: number[]
   lumaGrid: number[]
   lumaGridCoarse: number[]
+  /** Absent on sessions saved before these descriptors existed. */
+  colorHist?: number[]
+  edgeHist?: number[]
 }
 
 export const COARSE_GRID = 8
 
 /**
- * Combined visual similarity, 0-1.
+ * Combined visual similarity, 0-1. "Is this the same shot, before and after?"
  *
- * Weighted from what actually separates the classes on real photographs. The
- * coarse shifted grid is the strongest single term there, because it tolerates
- * the framing drift between two handheld shots; the fine grid still helps when
- * the two shots do line up; chromaticity carries real weight because the paint
- * and the surroundings stay the same colour even when the framing moves.
+ * The weights are measured, not argued — `npm run test:diagnose:descriptors`
+ * scores candidates against both sets of real photographs and prints the table
+ * this came from. The measure that matters there is *row wins*: for each before
+ * shot, does its true partner beat every impostor? A global assignment can
+ * rescue a row that loses, which is exactly how a weak descriptor stays hidden
+ * until the day it doesn't.
  *
- * Note the honest ceiling: on real before/after pairs this score lands around
- * 0.5-0.7 while unrelated shots reach 0.5, so it ranks well but cannot be used
- * as a hard gate. Suggestions are therefore ordered by it, not filtered by it.
+ * This weighting is the only one tried that wins every row on both sets, with
+ * the true pair ahead of the best impostor everywhere rather than merely ahead
+ * on aggregate.
+ *
+ * What changed, and why, because it is not what anyone would guess:
+ *
+ * **The luma grids are gone.** Cross-correlating a contrast-normalised grid was
+ * the backbone of this function and it is the weakest signal on real photos —
+ * on its own it wins 2 of 4 rows on one set and 3 of 5 on the other, and it was
+ * what married a wheel to a car boot. It assumes a before and an after are the
+ * same framing, and they are not. It stays in `sameTakeScore`, where the two
+ * frames genuinely are seconds apart and that assumption holds.
+ *
+ * **Colour is counted by presence, not by average.** See `colorHistogram`.
+ *
+ * **Edge texture carries nearly as much.** It is the term that actually broke
+ * the reported wheel-to-boot confusion: measured on those two frames, every
+ * other term preferred the boot, and edges preferred the wheel by 0.06. A tyre
+ * is dense tread and radial spokes; a boot is flat carpet.
+ *
+ * **dHash stays, at a low weight.** It is a coarse whole-frame signature that
+ * costs nothing, and adding it is what lifted the reference set from 4 of 5 rows
+ * to 5 of 5.
+ *
+ * The honest ceiling is unchanged: true pairs land around 0.5-0.8 and unrelated
+ * shots reach 0.5, so this ranks well but cannot be a hard gate. Suggestions are
+ * ordered by it, not filtered by it.
  */
 export function similarity(a: Fingerprint, b: Fingerprint): number {
-  const coarse = (shiftedNcc(a.lumaGridCoarse, b.lumaGridCoarse, COARSE_GRID, 2) + 1) / 2
-  const fine = (shiftedNcc(a.lumaGrid, b.lumaGrid, LUMA_GRID, 3) + 1) / 2
-  const chroma = 1 - chromaDistance(a.chromaSig, b.chromaSig)
   const hash = 1 - hamming(a.dhash, b.dhash) / 64
-  return coarse * 0.4 + fine * 0.25 + chroma * 0.25 + hash * 0.1
+
+  /* Sessions saved before these descriptors existed have no histograms, and
+     re-deriving them would mean decoding every photo again on restore. The old
+     weighting was worse but it was not broken, so an old session keeps working
+     rather than refusing to open. */
+  if (!a.colorHist || !b.colorHist || !a.edgeHist || !b.edgeHist) {
+    const coarse = (shiftedNcc(a.lumaGridCoarse, b.lumaGridCoarse, COARSE_GRID, 2) + 1) / 2
+    const fine = (shiftedNcc(a.lumaGrid, b.lumaGrid, LUMA_GRID, 3) + 1) / 2
+    const chroma = 1 - chromaDistance(a.chromaSig, b.chromaSig)
+    return coarse * 0.4 + fine * 0.25 + chroma * 0.25 + hash * 0.1
+  }
+
+  const color = colorHistogramSimilarity(a.colorHist, b.colorHist)
+  const edge = edgeHistogramSimilarity(a.edgeHist, b.edgeHist)
+  return color * 0.48 + edge * 0.4 + hash * 0.12
 }
 
 /**

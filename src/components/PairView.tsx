@@ -124,13 +124,58 @@ export default function PairView({
     )
   }, [group, current, onUpdateGroup])
 
+  /**
+   * "Not a pair" — try the next-best partner rather than giving up.
+   *
+   * Deleting the suggestion outright throws away everything the matcher knows
+   * about this photo and leaves the user to find its partner by hand. The
+   * runners-up are already ranked, so saying no walks down that list. Only when
+   * it runs out is the pair actually dropped, and then the photo lands in the
+   * hand-pairing panel where it can be matched with anything at all.
+   */
   const rejectCurrent = useCallback(() => {
+    if (!group || !current) return
+    const next = current.runnersUp?.[0]
+    haptic([8, 40, 8])
+
+    if (!next) {
+      onUpdateGroup(
+        group.id,
+        (g) => ({ ...g, pairs: g.pairs.filter((p) => p.id !== current.id) }),
+        'reject pair',
+      )
+      return
+    }
+
+    onUpdateGroup(
+      group.id,
+      (g) => ({
+        ...g,
+        pairs: g.pairs.map((p) =>
+          p.id === current.id
+            ? {
+                ...p,
+                afterId: next.id,
+                confidence: next.score,
+                runnersUp: p.runnersUp?.slice(1),
+                /* The alternates belonged to the take that just left. */
+                afterAlternates: undefined,
+              }
+            : p,
+        ),
+      }),
+      'try the next match',
+    )
+  }, [group, current, onUpdateGroup])
+
+  /** Drop the suggestion entirely, without walking the runners-up. */
+  const dropCurrent = useCallback(() => {
     if (!group || !current) return
     haptic([8, 40, 8])
     onUpdateGroup(
       group.id,
       (g) => ({ ...g, pairs: g.pairs.filter((p) => p.id !== current.id) }),
-      'reject pair',
+      'no partner',
     )
   }, [group, current, onUpdateGroup])
 
@@ -317,6 +362,11 @@ export default function PairView({
           e.preventDefault()
           swapCurrent()
           break
+        case 'n':
+        case 'N':
+          e.preventDefault()
+          dropCurrent()
+          break
         case ' ':
           e.preventDefault()
           skipCurrent()
@@ -338,7 +388,7 @@ export default function PairView({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [confirmCurrent, rejectCurrent, swapCurrent, skipCurrent, nextGroup, prevGroup])
+  }, [confirmCurrent, rejectCurrent, dropCurrent, swapCurrent, skipCurrent, nextGroup, prevGroup])
 
   if (!group) {
     return (
@@ -456,6 +506,14 @@ export default function PairView({
                 </div>
               </div>
 
+              {/* Rarer than the two verdicts, so it sits outside the thumb zone
+                  rather than competing with them for it. */}
+              <div className="review-extra">
+                <button className="btn ghost sm" onClick={dropCurrent} data-testid="no-partner">
+                  Neither — this one has no partner
+                </button>
+              </div>
+
               <p className="tiny dim" style={{ textAlign: 'center', marginTop: 12 }}>
                 {queue.length} left in this car · swipe or use the buttons
               </p>
@@ -563,9 +621,13 @@ export default function PairView({
       {current && (
         <div className="actionbar">
           <div className="actionbar-inner">
+            {/* The label says what the button will actually do. "Not a pair"
+                when there is nothing else to try, "Try another" when there is —
+                because those are different promises and getting the second one
+                wrong is what made rejecting feel like a dead end. */}
             <button className="verdict no" data-testid="reject" onClick={rejectCurrent}>
               <Icon name="close" size={20} />
-              Not a pair
+              {current.runnersUp?.length ? 'Try another' : 'Not a pair'}
             </button>
             <button
               className="verdict-sm"

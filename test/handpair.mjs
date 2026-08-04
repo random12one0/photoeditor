@@ -67,12 +67,13 @@ await page.waitForSelector('[data-view=cars]', { timeout: 120000 })
 await page.click('[data-view=cars] .btn.primary')
 await page.waitForSelector('[data-view=pairs]')
 
-/* Reject every automatic suggestion, which is what someone does when the
-   matcher got a car wrong — it puts all eight photos into the panel and is the
-   situation the panel exists for. */
+/* Declare every suggestion partnerless, which is what someone does when the
+   matcher got a car wrong — it puts all the photos into the panel and is the
+   situation the panel exists for. "Not a pair" is no longer the way to do that:
+   it now falls through to the next-best candidate rather than giving up. */
 let guard = 0
-while ((await page.locator('[data-testid=review-images]').count()) > 0 && guard++ < 40) {
-  await page.click('[data-testid=reject]')
+while ((await page.locator('[data-testid=review-images]').count()) > 0 && guard++ < 60) {
+  await page.click('[data-testid=no-partner]')
   await page.waitForTimeout(120)
 }
 await page.waitForTimeout(200)

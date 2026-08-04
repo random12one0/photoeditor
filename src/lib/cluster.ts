@@ -264,6 +264,18 @@ export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
     if (visual[i][j] < settings.minPairScore) return
     const beforeAlternates = beforeTakes[i].slice(1).map((p) => p.id)
     const afterAlternates = afterTakes[j].slice(1).map((p) => p.id)
+
+    /* Runners-up for this before shot: the other afters, best first, above the
+       floor. Saying no to a suggestion should offer the next best answer rather
+       than just deleting the question — the photo still has a partner
+       somewhere, and making the user go and find it by hand is a worse answer
+       than the one the matcher already has ranked. */
+    const runnersUp = after
+      .map((photo, k) => ({ id: photo.id, score: visual[i][k] }))
+      .filter((c) => c.id !== after[j].id && c.score >= settings.minPairScore)
+      .sort((x, y) => y.score - x.score)
+      .slice(0, 4)
+
     pairs.push({
       id: nextPairId(),
       beforeId: before[i].id,
@@ -273,6 +285,7 @@ export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
       confirmed: false,
       ...(beforeAlternates.length ? { beforeAlternates } : {}),
       ...(afterAlternates.length ? { afterAlternates } : {}),
+      ...(runnersUp.length ? { runnersUp } : {}),
     })
   })
 

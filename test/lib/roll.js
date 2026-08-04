@@ -8,9 +8,12 @@
 import {
   COARSE_GRID,
   LUMA_GRID,
+  QUALITY_GRID,
   chromaSignature,
+  colorHistogram,
   colorSignature,
   dhashFromImageData,
+  edgeHistogram,
   lumaGridFromImageData,
   meanLuma,
 } from '/src/lib/hash.ts'
@@ -195,6 +198,7 @@ export function makePhoto(spec, cfg = {}) {
   const colorGrid = grid(32, 32)
   const structureGrid = grid(LUMA_GRID, LUMA_GRID)
   const coarseGrid = grid(COARSE_GRID, COARSE_GRID)
+  const bigGrid = grid(QUALITY_GRID, QUALITY_GRID)
 
   return {
     id: spec.id,
@@ -210,6 +214,8 @@ export function makePhoto(spec, cfg = {}) {
     chromaSig: chromaSignature(colorGrid),
     lumaGrid: lumaGridFromImageData(structureGrid),
     lumaGridCoarse: lumaGridFromImageData(coarseGrid),
+    colorHist: colorHistogram(bigGrid),
+    edgeHist: edgeHistogram(bigGrid),
     luma: meanLuma(colorGrid),
   }
 }

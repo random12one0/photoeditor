@@ -21,6 +21,10 @@ export interface Photo {
   lumaGrid: number[]
   /** Contrast-normalised 8x8 grid — coarse enough to survive framing drift. */
   lumaGridCoarse: number[]
+  /** Which colours are present, whole frame then quadrants. See colorHistogram. */
+  colorHist: number[]
+  /** What kind of edges are where. Texture, which colour cannot see. */
+  edgeHist: number[]
   /** Mean luminance 0-255. A clean car is usually brighter than a dirty one. */
   luma: number
   /**
@@ -55,6 +59,15 @@ export interface Pair {
    */
   beforeAlternates?: string[]
   afterAlternates?: string[]
+  /**
+   * The next-best partners for this before shot, strongest first.
+   *
+   * Rejecting a suggestion used to delete it outright, which throws away
+   * everything the matcher knows and leaves the user to find the partner by
+   * hand. Now "not a pair" falls through to the runner-up, and only runs out of
+   * candidates when there genuinely are none left.
+   */
+  runnersUp?: { id: string; score: number }[]
 }
 
 export type OutputRatio = '4:5' | '1:1' | '9:16' | '3:4'

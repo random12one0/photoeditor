@@ -45,6 +45,60 @@ it was simply wrong: a before and an after are *not* the same framing. Nobody
 stands in the same spot ninety minutes later, and the reshoot is often from a
 visibly different distance and angle.
 
+**Averaging colour throws away the thing that separates a wheel from a car
+boot.** Reported as interiors being confused with wheels. The chromaticity
+signature takes the *mean* colour of each cell, which answers "what colour is
+this region" — and a wheel on grass averages to much the same grey-green as a
+grey boot carpet. Measured on real photographs, a dirty wheel scored higher
+against a clean boot than against the same wheel washed.
+
+A histogram answers a better question: does this photo contain any of this
+colour at all? That is Swain and Ballard's colour indexing, compared by
+histogram intersection, chosen because it degrades gracefully when a scene is
+reframed — which is exactly what happens between a before and an after taken
+hours apart from a slightly different spot.
+
+The user's own diagnosis was that an outdoor shot has green in it and an
+interior has none. Right in principle, and it is why the histogram is there —
+but on this particular pair it did not break the tie, because the boot was
+photographed with the hatch open: there is grass through the rear window and a
+green box in the side netting. Colour alone still preferred the boot by 0.006.
+
+**Texture is what actually separated them.** An edge histogram — MPEG-7's, near
+enough: gradient orientations in a 4×4 grid plus a global summary — was the only
+term that got that pair right, by 0.06. A tyre is dense tread and radial spokes;
+a boot is flat carpet. Two independent reasons to separate two subjects is the
+point, because the failure being fixed was two different things agreeing on one
+weak signal.
+
+**The luma grids are gone from pair scoring.** Cross-correlating a
+contrast-normalised grid was the backbone of this function and, measured, it is
+the weakest signal on real photographs: on its own it wins 2 of 4 rows on one
+set and 3 of 5 on the other. It assumes a before and an after are the same
+framing and they are not. It stays in `sameTakeScore`, where two shots really
+are seconds apart and the assumption holds.
+
+Weights were chosen by measurement, not argument. `npm run
+test:diagnose:descriptors` scores seventeen candidates against both sets of real
+photographs and prints the table. The measure that matters is *row wins* — for
+each before shot, does its true partner beat every impostor? — because a global
+assignment can rescue a row that loses, which is how a weak descriptor stays
+hidden until the day it doesn't.
+
+```
+candidate                    Jeep rows  Jeep pairs  ref rows  ref pairs  min margin
+current (before this change)       3/4         4/4       4/5        5/5      -0.036
+structure only                     2/4         4/4       3/5        2/5      -0.079
+colour histogram only              3/4         4/4       4/5        5/5      -0.006
+edge histogram only                4/4         4/4       4/5        5/5      -0.062
+colour + edge + dHash              4/4         4/4       5/5        5/5      +0.009
+```
+
+The last row is what ships, and it is the only candidate where every true pair
+beats every impostor on both sets rather than merely winning on aggregate. It
+also lifted the synthetic handheld-drift scenario from 92% to 100%, which had
+been a documented failure.
+
 **"Same framing" and "same car" are different questions.** Structure answers the
 first. It actively misleads on the second: two *different* cars photographed
 from the same spot correlate as strongly as a true pair does (0.957–0.997 vs
@@ -182,12 +236,12 @@ prints the whole score matrix per component if that stops being true.
 
 ## Measured accuracy
 
-Nine suites. `npm run test:assign`, `npm run test:readahead` and `npm run
+Ten suites. `npm run test:assign`, `npm run test:readahead` and `npm run
 test:decode` check the assignment solver, the import read-ahead and the proxy
 decode directly; `npm run test:accuracy`
 scores eight synthetic workflows; `npm run test:real`, `npm run test:samecar`,
-`npm run test:takes` and `npm run test:handpair` run the whole pipeline over real
-photographs.
+`npm run test:takes`, `npm run test:handpair` and `npm run test:runnerup` run the
+whole pipeline over real photographs.
 
 Ground truth for the real-photo set — which frame shows what, which pairs with
 which — is written down once in `test/lib/samecar-truth.mjs` and imported by
@@ -211,7 +265,7 @@ shot after — is left alone.
 | Half the jobs never got an after | 100% / 100% | 100% / 100% |
 | A 156-photo day, 12 cars | 100% / 100% | 100% / 100% |
 | Six near-identical silver cars | 100% / 100% | 100% / 100% |
-| Handheld drift between shots | 100% / 100% | 92% / 92% |
+| Handheld drift between shots | 100% / 100% | 100% / 100% |
 | Bay shop, 25-min turnaround | *merges — see below* | *merges* |
 
 Two rows are honest failures rather than passes in disguise, and both are
@@ -223,10 +277,8 @@ No gap threshold can separate those — any value large enough to hold one car
 together is larger than the pause before the next one. That workflow needs the
 Split button.
 
-**Handheld drift** loses two pairs of twenty-four with walk-around order
-switched off. That switch is what stopped a real wheel being married to a real
-centre console, and this is the price, paid in a synthetic case where every
-angle drifts.
+**Handheld drift** used to lose two pairs of twenty-four. The colour and edge
+histograms fixed it: it now scores 100%.
 
 
 ## Using it
@@ -243,8 +295,9 @@ angle drifts.
    | Key | Action |
    |---|---|
    | `→` `Enter` `Y` | Confirm the pair |
-   | `←` `X` | Not a pair |
+   | `←` `X` | Not a pair — offers the next best |
    | `S` | Swap before and after |
+   | `N` | Neither — no partner at all |
    | `Space` | Skip for now |
    | `P` | Toggle the finished preview |
    | `↑` `↓` | Previous / next car |
@@ -348,6 +401,7 @@ npm run test:real        # the whole pipeline over real detailing photos
 npm run test:samecar     # the bug report: one car, one job, eight real photos
 npm run test:takes       # three shots of one angle — does the sharpest win?
 npm run test:handpair    # pairing the leftovers by hand
+npm run test:runnerup    # saying no falls through to the next-best candidate
 npm run test:readahead   # import read-ahead, with the file latency simulated
 npm run test:decode      # decoding straight to proxy size, and its timing
 npm run test:accuracy    # precision/recall across 8 adversarial scenarios
@@ -355,6 +409,7 @@ npm run test:diagnose    # distance distributions on synthetic fixtures
 npm run test:diagnose:real  # …and on real photos. Run before touching a threshold.
 npm run test:diagnose:takes # same-take vs different-angle, on both photo sources
 npm run test:diagnose:interior # the whole before x after matrix, per component
+npm run test:diagnose:descriptors # scores candidate scoring functions on real photos
 npm run test:measure     # re-measure reference collages, re-cut their panels
 npm run test:shots       # screenshots and a sample composite into test/output/
 ```
@@ -373,7 +428,7 @@ only.
 ### Layout
 
 ```
-src/lib/hash.ts        fingerprinting — luma grids, chromaticity, dHash, shot quality
+src/lib/hash.ts        fingerprinting — colour and edge histograms, luma grids, dHash, shot quality
 src/lib/cluster.ts     car grouping on the clock, take collapsing, pair suggestion
 src/lib/assign.ts      optimal one-to-one assignment (Hungarian)
 src/lib/render.ts      the composite renderer

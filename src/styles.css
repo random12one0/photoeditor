@@ -1656,3 +1656,11 @@ input[type='range']::-moz-range-thumb {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Secondary verdict. Deliberately not in the action bar: it is the rare case,
+   and the thumb zone belongs to the two answers given on every photo. */
+.review-extra {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
