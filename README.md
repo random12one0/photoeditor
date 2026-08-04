@@ -83,7 +83,10 @@ about which signal does which job:
    over the whole before/after set, so the result is the best *total* matching
    rather than whatever a greedy first pass grabbed. Greedy commits to the
    best-looking single pair and lets everything downstream settle for the
-   leftovers, which is how a wheel ends up married to a centre console.
+   leftovers, which is how a wheel ends up married to a centre console. The
+   contract is maximum cardinality first, minimum cost second — see the note on
+   unbalanced sets below, because getting that order wrong is subtle and cost a
+   real pair.
 3. **Walk-around order is off by default.** The idea was sound — people circle a
    car the same way twice — but it assumes the two batches line up, and they
    don't: three before shots against five after shots makes index 1 the console
@@ -138,24 +141,68 @@ the 0.1-wide gap the real photographs actually have.
 The losers aren't discarded. They're offered on the pair as a strip of
 thumbnails — tap one to swap it in — and still export with their car.
 
+**More before shots than after shots is where the solver was wrong.** Reported
+as interiors pairing badly, and the diagnosis is worth keeping because the
+symptom pointed away from the cause. On a real nine-photo job — five before
+shots, four after — the three exterior pairs came out exact and the interior did
+not: the dirty console lost its own clean console, and the driver's seat, which
+had no partner anywhere in the set, took it instead.
+
+The scores were fine. The dirty console's best match in its own row *was* the
+clean console, and the correct assignment scored 2.940 against the 2.869 that
+came out. The solver returned a worse answer than the right one, which is the
+one thing an optimal algorithm may not do.
+
+The shortest-augmenting-path formulation walks the rows in order. With more rows
+than columns some row must go unassigned, and it gives up on whichever row it
+reaches with no free column left — so *which* row loses is decided by position
+rather than by cost. The last before shot was dropped instead of the worst one.
+Transposing when there are more rows than columns puts the short side on the
+rows, where every row genuinely can be assigned and the optimisation decides
+which columns miss out.
+
+Worth stating plainly: `npm run test:assign` had been comparing the solver
+against a brute-force reference for 300 random matrices, including this shape,
+and reported no mismatches. The reference forced the *first* `cols` rows to be
+assigned — exactly the same wrong assumption as the solver. Two implementations
+agreeing with each other is not a test. With the reference fixed to enumerate
+which rows are used, 127 of 171 tall matrices were wrong.
+
+**The ground truth was also wrong, in the direction that hides a bug.** The two
+centre-console frames were recorded as having no partner and the suite asserted
+they must be left alone — so the suite was demanding the failure it existed to
+catch. They are a genuine pair: the console dusty, then the console wiped. What
+each frame shows now lives in one place, `test/lib/samecar-truth.mjs`, with the
+subject of every photograph written down, because a ground truth spread across
+three files is three places to be wrong.
+
+Interiors themselves turned out not to need special handling. Once the solver
+was fixed the console pair came out exact, and `npm run test:diagnose:interior`
+prints the whole score matrix per component if that stops being true.
+
 ## Measured accuracy
 
-Seven suites. `npm run test:assign` and `npm run test:readahead` check the
+Eight suites. `npm run test:assign` and `npm run test:readahead` check the
 assignment solver and the import read-ahead directly; `npm run test:accuracy`
 scores eight synthetic workflows; `npm run test:real`, `npm run test:samecar`,
 `npm run test:takes` and `npm run test:handpair` run the whole pipeline over real
 photographs.
 
-The one that matters most is `test:samecar`, because it is the bug report:
-eight photos of a single Jeep across one job, with ground truth established by
-looking at every photo. It asserts that the car stays one car, that the wheel
-pairs with the wheel, the trunk with the trunk, the exterior with the exterior,
-and that the two centre-console shots with no partner are left alone.
+Ground truth for the real-photo set — which frame shows what, which pairs with
+which — is written down once in `test/lib/samecar-truth.mjs` and imported by
+every suite that needs it.
+
+The one that matters most is `test:samecar`, because it is the bug report: nine
+photos of a single Jeep across one job, with ground truth established by looking
+at every photo. It asserts that the car stays one car, that the wheel pairs with
+the wheel, the trunk with the trunk, the exterior with the exterior, the dusty
+console with the wiped console, and that the driver's seat — shot before, never
+shot after — is left alone.
 
 | Scenario | Grouping P/R | Pairing P/R |
 |---|---|---|
-| One Jeep, one job (real photos) | one car | 3/3 exact |
-| Same Jeep, every angle shot 3× (real photos) | one car | 3/3 exact, sharpest take |
+| One Jeep, one job, 9 real photos | one car | 4/4 exact, incl. the interior pair |
+| Same Jeep, every angle shot 3× (real photos) | one car | 4/4 exact, sharpest take |
 | Five jobs (real photos) | 100% / 100% | 5/5 exact |
 | 8 cars, clean gaps (64 photos) | 100% / 100% | 100% / 100% |
 | No EXIF, timestamps bunched | 100% / 100% | 100% / 100% |
@@ -273,6 +320,7 @@ npm run test:accuracy    # precision/recall across 8 adversarial scenarios
 npm run test:diagnose    # distance distributions on synthetic fixtures
 npm run test:diagnose:real  # …and on real photos. Run before touching a threshold.
 npm run test:diagnose:takes # same-take vs different-angle, on both photo sources
+npm run test:diagnose:interior # the whole before x after matrix, per component
 npm run test:measure     # re-measure reference collages, re-cut their panels
 npm run test:shots       # screenshots and a sample composite into test/output/
 ```

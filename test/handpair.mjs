@@ -16,6 +16,7 @@
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { launchBrowser, startServer } from './lib/harness.mjs'
+import { MINUTES } from './lib/samecar-truth.mjs'
 
 const PORT = 4330
 const DIR = new URL('./fixtures/samecar/', import.meta.url).pathname
@@ -39,7 +40,7 @@ page.on('pageerror', (e) => pageErrors.push(e.message))
 await page.goto(`http://127.0.0.1:${PORT}`)
 await page.waitForSelector('[data-view=import]')
 
-const total = await page.evaluate(async (files) => {
+const total = await page.evaluate(async ({ files, minutes }) => {
   const MIN = 60_000
   const t0 = new Date('2026-05-10T09:00:00Z').getTime()
   const out = []
@@ -49,7 +50,7 @@ const total = await page.evaluate(async (files) => {
     out.push(
       new File([await res.blob()], files[i], {
         type: 'image/jpeg',
-        lastModified: t0 + [0, 6, 13, 190, 205, 218, 240, 262][i % 8] * MIN,
+        lastModified: t0 + minutes[files[i].match(/IMG_(\d+)/)[1]] * MIN,
       }),
     )
   }
@@ -59,7 +60,7 @@ const total = await page.evaluate(async (files) => {
   input.files = dt.files
   input.dispatchEvent(new Event('change', { bubbles: true }))
   return out.length
-}, names)
+}, { files: names, minutes: MINUTES })
 
 console.log(`${total} photos of one car\n`)
 await page.waitForSelector('[data-view=cars]', { timeout: 120000 })

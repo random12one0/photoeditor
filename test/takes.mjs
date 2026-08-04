@@ -18,6 +18,7 @@
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { launchBrowser, startServer } from './lib/harness.mjs'
+import { BEFORE, PAIRS, SUBJECT, num } from './lib/samecar-truth.mjs'
 
 const PORT = 4329
 const DIR = new URL('./fixtures/samecar/', import.meta.url).pathname
@@ -40,15 +41,17 @@ page.on('pageerror', (e) => console.error('PAGE ERROR:', e.message))
 await page.goto(`http://127.0.0.1:${PORT}`)
 await page.waitForSelector('[data-view=import]')
 
-const built = await page.evaluate(async (files) => {
+const built = await page.evaluate(async ({ files, beforeNums, pairable }) => {
   const MIN = 60_000
   const t0 = new Date('2026-05-10T09:00:00Z').getTime()
 
-  /* The before pass is IMG_79xx, the after pass IMG_80xx, four hours later —
-     the way the photos are actually taken: every before first, the detail, then
-     every after. */
-  const befores = files.filter((f) => /IMG_79/.test(f))
-  const afters = files.filter((f) => /IMG_80/.test(f))
+  /* Which frames are the before pass comes from the shared ground truth, not
+     from the file numbering — the numbering looks like it splits at 8000 and
+     does not. Four hours of detailing separates the two passes, the way the
+     photos are actually taken. */
+  const numOf = (n) => n.match(/IMG_(\d+)/)?.[1]
+  const befores = files.filter((f) => beforeNums.includes(numOf(f)))
+  const afters = files.filter((f) => !beforeNums.includes(numOf(f)))
 
   async function bitmapOf(name) {
     const res = await fetch(`/test/fixtures/samecar/${name}`)
@@ -90,7 +93,8 @@ const built = await page.evaluate(async (files) => {
         }),
       )
     }
-    expected.push(`${stem}_sharp.jpg`)
+    // Only the angles that actually have an after can end up in a pair.
+    if (pairable.includes(numOf(befores[i]))) expected.push(`${stem}_sharp.jpg`)
     bitmap.close()
   }
 
@@ -113,7 +117,7 @@ const built = await page.evaluate(async (files) => {
   input.dispatchEvent(new Event('change', { bubbles: true }))
 
   return { total: out.length, bursts: befores.length, expected }
-}, names)
+}, { files: names, beforeNums: BEFORE, pairable: Object.keys(PAIRS) })
 
 console.log(
   `${built.total} photos — ${built.bursts} before angles shot 3× each, ${built.total - built.bursts * 3} single afters\n`,
@@ -196,10 +200,13 @@ const confirmed = await page.evaluate(() =>
 console.log(`  ${confirmed.length} pair(s):`)
 for (const p of confirmed) console.log(`    ${p.before}  →  ${p.after}`)
 
+/* One pair per before angle that has an after — not three, and not one for the
+   angle that never got an after. */
+const pairableAngles = Object.keys(PAIRS).length
 check(
-  'one pair per before angle, not three',
-  confirmed.length === built.bursts,
-  `${confirmed.length} of ${built.bursts}`,
+  'one pair per before angle that has an after, not three',
+  confirmed.length === pairableAngles,
+  `${confirmed.length} of ${pairableAngles} (from ${built.bursts} bursts)`,
 )
 
 console.log('\n[5] The sharp take is the one that got picked')
@@ -210,8 +217,16 @@ check(
   blurredUsed.length ? blurredUsed.map((p) => p.before).join(', ') : 'all sharp',
 )
 for (const want of built.expected) {
-  check(`${want} was chosen`, confirmed.some((p) => p.before === want))
+  check(
+    `${want} was chosen  (${SUBJECT[num(want)] ?? ''})`,
+    confirmed.some((p) => p.before === want),
+  )
 }
+check(
+  'the angle with no after was left unpaired',
+  !confirmed.some((p) => /IMG_8001/.test(p.before ?? '')),
+  `${SUBJECT['8001']}`,
+)
 
 console.log('\n[6] The rejected takes are still offered')
 const strips = seen.filter((s) => s.beforeTakes.length > 0)
@@ -238,14 +253,16 @@ console.log('\n[7] Nothing was thrown away')
 const leftover = await page.evaluate(
   () => document.querySelectorAll("[data-testid=pair-by-hand] .handpair-tile").length,
 )
-/* Two rejected takes per before angle, plus the after shots that genuinely have
-   no partner — in this set the two centre-console photos. */
+/* Two rejected takes per before angle, plus the sharp take of any before angle
+   that never got an after — here the driver's seat — plus any after with no
+   partner. Nothing may simply vanish. */
 const unusedTakes = built.bursts * 2
-const unpairedAfters = built.total - built.bursts * 3 - confirmed.length
+const beforesWithoutAfter = built.bursts - confirmed.length
+const aftersWithoutBefore = built.total - built.bursts * 3 - confirmed.length
 check(
-  'the unused takes are still there to hand-pair or export',
-  leftover === unusedTakes + unpairedAfters,
-  `${leftover} left over = ${unusedTakes} rejected takes + ${unpairedAfters} afters with no partner`,
+  'nothing vanished — every unused photo is still reachable',
+  leftover === unusedTakes + beforesWithoutAfter + aftersWithoutBefore,
+  `${leftover} = ${unusedTakes} rejected takes + ${beforesWithoutAfter} before(s) with no after + ${aftersWithoutBefore} after(s) with no before`,
 )
 
 console.log('\n[8] Console health')

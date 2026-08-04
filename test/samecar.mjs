@@ -1,17 +1,35 @@
 /**
- * The two bugs reported from real use, checked against real photos of one car.
+ * One car, one job, nine real photographs — the bug-report suite.
+ *
+ * It started as the two failures reported from real use:
  *
  *   1. A single car being split into six.
  *   2. Wheels being matched to interiors.
  *
- * The fixtures are one car shot over a morning. Timestamps are synthesised here
- * because the upload path strips EXIF, but the *shape* is what a real session
- * looks like: many short bursts spread across the job, not two tidy ones.
+ * It now also carries the interior case, which was reported next and which this
+ * file previously got backwards: the two centre-console frames were recorded as
+ * having no partner, and asserted to be left alone. They are a genuine pair —
+ * the console dusty, then the console wiped — so the suite was demanding the
+ * very failure it was meant to catch. Ground truth now lives in one place,
+ * test/lib/samecar-truth.mjs, with what each frame actually shows.
+ *
+ * Timestamps are synthesised because the upload path strips EXIF, but the shape
+ * is real: every before shot, four hours of work, every after shot.
  *
  * Run:  node test/samecar.mjs
  */
-import { launchBrowser, startServer } from './lib/harness.mjs'
 import { existsSync, readdirSync } from 'node:fs'
+import { launchBrowser, startServer } from './lib/harness.mjs'
+import {
+  AFTER,
+  BEFORE,
+  INTERIOR,
+  MINUTES,
+  NO_PARTNER,
+  PAIRS,
+  SUBJECT,
+  num,
+} from './lib/samecar-truth.mjs'
 
 const PORT = 4327
 const DIR = new URL('./fixtures/samecar/', import.meta.url).pathname
@@ -30,43 +48,50 @@ const check = (label, cond, detail = '') => {
   if (!cond) failures++
 }
 
+const missing = [...BEFORE, ...AFTER].filter((n) => !names.some((f) => num(f) === n))
+if (missing.length) {
+  console.error(`Fixture set is incomplete — missing IMG_${missing.join(', IMG_')}`)
+  process.exit(1)
+}
+
 const { proc: server } = await startServer(PORT, { mode: 'dev' })
 const browser = await launchBrowser()
 const page = await browser.newPage()
-page.on('pageerror', (e) => console.error('PAGE ERROR:', e.message))
+const pageErrors = []
+page.on('pageerror', (e) => pageErrors.push(e.message))
 await page.goto(`http://127.0.0.1:${PORT}`)
 await page.waitForSelector('[data-view=import]')
 
-const injected = await page.evaluate(async (files) => {
-  const MIN = 60_000
-  const t0 = new Date('2026-05-10T09:00:00Z').getTime()
-  const out = []
+const injected = await page.evaluate(
+  async ({ files, minutes }) => {
+    const MIN = 60_000
+    const t0 = new Date('2026-05-10T09:00:00Z').getTime()
+    const out = []
 
-  /* One car, photographed across a five-hour job in many separate bursts —
-     the shape that used to shatter into six cars. Lower IMG numbers are the
-     before pass, higher ones the after pass. */
-  const offsets = [0, 6, 13, 190, 205, 218, 240, 262]
+    for (const name of files) {
+      const key = name.match(/IMG_(\d+)/)?.[1]
+      const res = await fetch(`/test/fixtures/samecar/${name}`)
+      if (!res.ok) throw new Error(`${name} ${res.status}`)
+      out.push(
+        new File([await res.blob()], name, {
+          type: 'image/jpeg',
+          lastModified: t0 + minutes[key] * MIN,
+        }),
+      )
+    }
 
-  for (let i = 0; i < files.length; i++) {
-    const res = await fetch(`/test/fixtures/samecar/${files[i]}`)
-    if (!res.ok) throw new Error(`${files[i]} ${res.status}`)
-    out.push(
-      new File([await res.blob()], files[i], {
-        type: 'image/jpeg',
-        lastModified: t0 + offsets[i % offsets.length] * MIN,
-      }),
-    )
-  }
+    const input = document.querySelector('input[type=file]')
+    const dt = new DataTransfer()
+    out.forEach((f) => dt.items.add(f))
+    input.files = dt.files
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    return out.length
+  },
+  { files: names, minutes: MINUTES },
+)
 
-  const input = document.querySelector('input[type=file]')
-  const dt = new DataTransfer()
-  out.forEach((f) => dt.items.add(f))
-  input.files = dt.files
-  input.dispatchEvent(new Event('change', { bubbles: true }))
-  return out.length
-}, names)
-
-console.log(`${injected} photos of one car, spread over ~4.4 hours\n`)
+const span = (Math.max(...Object.values(MINUTES)) / 60).toFixed(1)
+console.log(`${injected} photos of one car over ${span} hours, four of them a job gap\n`)
 await page.waitForSelector('[data-view=cars]', { timeout: 120000 })
 await page.waitForTimeout(500)
 
@@ -74,29 +99,17 @@ console.log('[1] One car stays one car')
 const carCount = await page.locator('[data-view=cars] .card').count()
 check('grouped into a single car', carCount === 1, `${carCount} car(s)`)
 
-console.log('\n[2] Pairs are the same subject')
-const pairs = await page.evaluate(() => {
-  const rows = [...document.querySelectorAll('.pair-row')]
-  return rows.map((r) => {
-    const imgs = r.querySelectorAll('img[data-photo]')
-    return { before: imgs[0]?.dataset.photo, after: imgs[1]?.dataset.photo }
-  })
-})
-
+console.log('\n[2] The before/after split lands on the job, not inside a pass')
 await page.click('[data-view=cars] .btn.primary')
 await page.waitForSelector('[data-view=pairs]')
 await page.waitForTimeout(300)
 
-const suggested = []
 let guard = 0
 while ((await page.locator('[data-testid=review-images]').count()) > 0 && guard++ < 40) {
-  const shown = await page.evaluate(() => {
-    const imgs = document.querySelectorAll('[data-testid=review-images] img')
-    return { pct: document.querySelector('.match .mono')?.textContent }
-  })
   await page.click('[data-testid=confirm]')
   await page.waitForTimeout(120)
 }
+
 const confirmed = await page.evaluate(() =>
   [...document.querySelectorAll('.pair-row')].map((r) => {
     const imgs = r.querySelectorAll('img[data-photo]')
@@ -105,26 +118,29 @@ const confirmed = await page.evaluate(() =>
 )
 
 console.log(`  proposed ${confirmed.length} pair(s):`)
-for (const p of confirmed) console.log(`    ${p.before}  →  ${p.after}`)
+for (const p of confirmed) {
+  const b = num(p.before)
+  const a = num(p.after)
+  const right = PAIRS[b] === Number(a)
+  console.log(
+    `    ${right ? '·' : '!'} ${b} ${SUBJECT[b] ?? ''}  →  ${a} ${SUBJECT[a] ?? ''}`,
+  )
+}
 
-/* Ground truth, established by looking at every photo in the set:
- *   7986 exterior dirty  -> 8011 exterior clean
- *   7993 wheel dirty     -> 8009 wheel clean
- *   7996 trunk dirty     -> 8006 trunk clean
- *   8003, 8005           -> centre-console shots with no partner
- *
- * This is the case that used to produce wheel-to-console matches. */
-const TRUTH = { 7986: 8011, 7993: 8009, 7996: 8006 }
-const NO_PARTNER = ['8003', '8005']
+const wrongSide = confirmed.filter((p) => !BEFORE.includes(num(p.before)))
+check(
+  'every proposed before really is from the before pass',
+  wrongSide.length === 0,
+  wrongSide.map((p) => num(p.before)).join(', ') || 'clean',
+)
 
-const num = (n) => n?.match(/IMG_(\d+)/)?.[1]
-
-for (const [before, after] of Object.entries(TRUTH)) {
+console.log('\n[3] Every true pair is found, and none invented')
+for (const [before, after] of Object.entries(PAIRS)) {
   const got = confirmed.find((p) => num(p.before) === before)
   check(
-    `${before} pairs with ${after}`,
+    `${before} ${SUBJECT[before]}  →  ${after} ${SUBJECT[after]}`,
     got && num(got.after) === String(after),
-    got ? `got ${num(got.after)}` : 'not proposed',
+    got ? `got ${num(got.after)} ${SUBJECT[num(got.after)] ?? ''}` : 'not proposed',
   )
 }
 
@@ -132,12 +148,43 @@ const strays = confirmed.filter(
   (p) => NO_PARTNER.includes(num(p.before)) || NO_PARTNER.includes(num(p.after)),
 )
 check(
-  'the console shots are left unpaired',
+  `the ${NO_PARTNER.length} shot with no partner is left alone`,
   strays.length === 0,
   strays.length ? strays.map((p) => `${num(p.before)}→${num(p.after)}`).join(', ') : 'clean',
 )
 
-check('exactly three pairs proposed', confirmed.length === 3, `${confirmed.length}`)
+check(
+  `exactly ${Object.keys(PAIRS).length} pairs proposed`,
+  confirmed.length === Object.keys(PAIRS).length,
+  `${confirmed.length}`,
+)
+
+console.log('\n[4] The interior frames specifically')
+/* Called out separately because they are the reported weak spot: dark, low
+   contrast, and with none of the paint colour that separates one car from
+   another. Whether the rest of the set works says nothing about these. */
+const interiorPairs = Object.entries(PAIRS).filter(([b]) => INTERIOR.includes(b))
+for (const [before, after] of interiorPairs) {
+  const got = confirmed.find((p) => num(p.before) === before)
+  check(
+    `interior: ${before} → ${after}`,
+    got && num(got.after) === String(after),
+    got ? `got ${num(got.after)}` : 'not proposed',
+  )
+}
+const interiorStray = confirmed.filter(
+  (p) =>
+    (INTERIOR.includes(num(p.before)) && !INTERIOR.includes(num(p.after))) ||
+    (!INTERIOR.includes(num(p.before)) && INTERIOR.includes(num(p.after))),
+)
+check(
+  'no interior married to an exterior',
+  interiorStray.length === 0,
+  interiorStray.map((p) => `${num(p.before)}→${num(p.after)}`).join(', ') || 'clean',
+)
+
+console.log('\n[5] Console health')
+check('no page errors', pageErrors.length === 0, pageErrors.join('; ') || 'clean')
 
 await browser.close()
 server.kill('SIGTERM')

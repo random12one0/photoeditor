@@ -22,6 +22,7 @@
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { launchBrowser, startServer } from './lib/harness.mjs'
+import { BEFORE } from './lib/samecar-truth.mjs'
 
 const PORT = 4328
 const DIR = new URL('./fixtures/samecar/', import.meta.url).pathname
@@ -37,7 +38,7 @@ page.on('pageerror', (e) => console.error('PAGE ERROR:', e.message))
 await page.goto(`http://127.0.0.1:${PORT}`)
 await page.waitForSelector('[data-view=import]')
 
-const out = await page.evaluate(async (files) => {
+const out = await page.evaluate(async ({ files, beforeNums }) => {
   const {
     qualityFromImageData,
     similarity,
@@ -141,8 +142,10 @@ const out = await page.evaluate(async (files) => {
   /* Only compare within a batch. A before and its own after look like the same
      take by design and are never candidates to be collapsed, because befores
      are grouped among befores and afters among afters.
-     In this fixture the before pass is IMG_79xx and the after pass IMG_80xx. */
-  const batchOf = (name) => (/IMG_79/.test(name) ? 'before' : 'after')
+     Which frames are the before pass comes from the shared ground truth: the
+     numbering looks like it splits at 8000 and does not. */
+  const batchOf = (name) =>
+    beforeNums.includes(name.match(/IMG_(\d+)/)?.[1]) ? 'before' : 'after'
   const realOtherAngle = []
   const realAcrossBatch = []
   for (let i = 0; i < realOriginals.length; i++) {
@@ -199,7 +202,7 @@ const out = await page.evaluate(async (files) => {
     real: { sameTake: realSameTake, otherAngle: realOtherAngle, acrossBatch: realAcrossBatch },
     synth: { sameTake: synthSameTake, otherAngle: synthOtherAngle },
   }
-}, names)
+}, { files: names, beforeNums: BEFORE })
 
 const n = (x) => x.toFixed(3)
 const short = (s) => s.replace(/\.jpe?g$/i, '').replace(/^IMG_/, '')

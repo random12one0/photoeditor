@@ -22,7 +22,8 @@
     "test:takes": "node test/takes.mjs",
     "test:diagnose:takes": "node test/diagnose-takes.mjs",
     "test:handpair": "node test/handpair.mjs",
-    "test:readahead": "node test/readahead.test.mjs"
+    "test:readahead": "node test/readahead.test.mjs",
+    "test:diagnose:interior": "node test/diagnose-interior.mjs"
   },
   "dependencies": {
     "exifr": "^7.1.3",
