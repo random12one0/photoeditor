@@ -340,6 +340,40 @@ export default function App() {
     [checkpoint],
   )
 
+  /**
+   * Correct a photo's capture time.
+   *
+   * Everything downstream — which car a photo lands in, which shots are the
+   * before batch, which pairs get proposed — is built on these timestamps. When
+   * a photo arrives without EXIF, or with a time set by whatever copied it
+   * rather than the camera, the grouping inherits that error and no amount of
+   * merging and splitting really fixes it. Editing the time at the source does.
+   */
+  const setPhotoTime = useCallback(
+    (photoId: string, takenAt: number) => {
+      checkpoint('change photo time')
+      setPhotos((ps) =>
+        ps.map((p) =>
+          p.id === photoId ? { ...p, takenAt, timeIsApproximate: false } : p,
+        ),
+      )
+      // Keep each car's photos in time order so the before/after split, which
+      // looks for the widest internal pause, still sees the right sequence.
+      setGroups((gs) =>
+        gs.map((g) => ({
+          ...g,
+          photoIds: [...g.photoIds].sort((a, b) => {
+            const ta = a === photoId ? takenAt : (photoMap.get(a)?.takenAt ?? 0)
+            const tb = b === photoId ? takenAt : (photoMap.get(b)?.takenAt ?? 0)
+            return ta - tb
+          }),
+        })),
+      )
+      notify('Time updated — re-group to rebuild the cars around it', true)
+    },
+    [photoMap, notify, checkpoint],
+  )
+
   /* ---------------------------------------------------------------- presets */
 
   const savePresetAs = useCallback(
@@ -505,6 +539,7 @@ export default function App() {
           onSplit={splitPhotosToNewGroup}
           onMove={movePhotos}
           onDelete={deletePhotos}
+          onSetTime={setPhotoTime}
           onNext={() => setStage('pairs')}
         />
       )}

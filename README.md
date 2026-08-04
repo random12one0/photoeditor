@@ -107,7 +107,11 @@ dry one in the after.
 ## Using it
 
 1. **Import** — drop in photos or pick them from the camera roll.
-2. **Cars** — check the grouping. Rename, merge, split or move photos.
+2. **Cars** — check the grouping. Rename, merge, split or move photos. Every
+   photo shows its capture time, and a `~` means the time was guessed from the
+   file rather than read from the photo. Select one photo and tap **Time** to
+   correct it; a banner warns when a whole import arrived without capture
+   times, because the grouping is only ever as good as they are.
 3. **Pairs** — confirm or reject each suggestion. Swipe the card, or use the
    buttons, or:
 

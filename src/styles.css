@@ -708,6 +708,53 @@ kbd {
   color: #fbbf6b;
 }
 
+/* A timestamp on every thumbnail. Legible over any photo without a heavy
+   scrim, since it sits on hundreds of tiles at once. */
+.thumb-time {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 5px 3px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+  color: #e8e8ea;
+  font-size: 0.62rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+.thumb-time.warn {
+  color: #fbbf6b;
+}
+
+.range {
+  margin-bottom: var(--s2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Something the user needs to know before trusting what's on screen. Amber
+   rather than red: the grouping still works, it just rests on softer ground. */
+.notice {
+  display: flex;
+  gap: var(--s3);
+  align-items: flex-start;
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s4);
+  border: 1px solid color-mix(in srgb, #fbbf6b 32%, var(--line));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, #fbbf6b 8%, var(--surface));
+  color: #fbbf6b;
+}
+.notice strong {
+  display: block;
+  font-size: 0.88rem;
+  margin-bottom: 2px;
+}
+.notice p {
+  color: var(--text-2);
+}
+
 /* ================================================================== pairs */
 
 .group-strip {
