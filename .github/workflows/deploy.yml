@@ -5,7 +5,9 @@ name: Deploy to GitHub Pages
 # before it still verifies the build.
 on:
   push:
-    branches: [main, master]
+    # This repository's default branch is the feature branch below; add main
+    # here too so the deploy keeps working after any future merge.
+    branches: [main, master, claude/card-detailing-photo-editor-2m3w72]
   workflow_dispatch:
 
 permissions:
