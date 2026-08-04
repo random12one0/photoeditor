@@ -34,7 +34,7 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 1400, height: 950 } })
   page.on('pageerror', (e) => console.error('PAGE ERROR:', e.message))
   await page.goto(BASE)
-  await page.waitForSelector('.dropzone')
+  await page.waitForSelector('[data-view=import] .dropzone')
   await page.screenshot({ path: `${OUT}1-import.png` })
 
   // Build a roll in-page and feed it through the app's real import path.
@@ -73,12 +73,12 @@ async function main() {
   })
   console.log(`injected ${count} photos`)
 
-  await page.waitForSelector('.groups-view', { timeout: 60000 })
+  await page.waitForSelector('[data-view=cars]', { timeout: 60000 })
   await page.waitForTimeout(400)
   await page.screenshot({ path: `${OUT}2-cars.png`, fullPage: true })
 
-  await page.click('.btn.primary:has-text("Pair them up")')
-  await page.waitForSelector('.pair-view')
+  await page.click('[data-view=cars] .btn.primary')
+  await page.waitForSelector('[data-view=pairs]')
   await page.waitForTimeout(300)
   await page.screenshot({ path: `${OUT}3-pairs.png` })
 
@@ -87,7 +87,7 @@ async function main() {
     await page.locator('.group-strip .chip').nth(car).click()
     await page.waitForTimeout(120)
     let guard = 0
-    while ((await page.locator('.review-images').count()) > 0 && guard++ < 50) {
+    while ((await page.locator('[data-testid=review-images]').count()) > 0 && guard++ < 50) {
       await page.keyboard.press('ArrowRight')
       await page.waitForTimeout(70)
     }
@@ -122,8 +122,8 @@ async function main() {
     console.log('no confirmed pair available for the composite sample')
   }
 
-  await page.click('.stage-tab:has-text("Style")')
-  await page.waitForSelector('.style-view')
+  await page.click('[data-step=style]')
+  await page.waitForSelector('[data-view=style]')
   await page.waitForTimeout(900)
   await page.screenshot({ path: `${OUT}4-style.png`, fullPage: true })
 
@@ -133,10 +133,10 @@ async function main() {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.waitForTimeout(600)
   await page.screenshot({ path: `${OUT}5-mobile-style.png` })
-  await page.click('.stage-tab:has-text("3")')
+  await page.click('[data-step=pairs]')
   await page.waitForTimeout(600)
   await page.screenshot({ path: `${OUT}6-mobile-pairs.png` })
-  await page.click('.stage-tab:has-text("2")')
+  await page.click('[data-step=cars]')
   await page.waitForTimeout(400)
   await page.screenshot({ path: `${OUT}7-mobile-cars.png` })
 

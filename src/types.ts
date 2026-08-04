@@ -17,8 +17,10 @@ export interface Photo {
   colorSig: number[]
   /** Exposure-invariant 4x4 chromaticity signature. Separates car from car. */
   chromaSig: number[]
-  /** Contrast-normalised 16x16 luma grid. The main same-shot signal. */
+  /** Contrast-normalised 16x16 luma grid. */
   lumaGrid: number[]
+  /** Contrast-normalised 8x8 grid — coarse enough to survive framing drift. */
+  lumaGridCoarse: number[]
   /** Mean luminance 0-255. A clean car is usually brighter than a dirty one. */
   luma: number
 }
@@ -43,8 +45,13 @@ export interface Pair {
 }
 
 export type OutputRatio = '4:5' | '1:1' | '9:16' | '3:4'
-export type FitMode = 'cover' | 'contain'
 export type BackgroundSource = 'after' | 'before' | 'blend'
+/** Which photo sits on top of the stack. */
+export type StackOrder = 'after-first' | 'before-first'
+/** 'each' keeps both photos' own shapes; 'match' crops them to one frame. */
+export type FrameFit = 'each' | 'match'
+/** Stacked reads better in a feed; side-by-side suits wide crops. */
+export type Layout = 'stacked' | 'side-by-side'
 
 /** Every knob the renderer exposes. Persisted between sessions. */
 export interface StylePreset {
@@ -52,6 +59,8 @@ export interface StylePreset {
   /** Long edge of the exported JPEG, in px. */
   exportSize: number
   jpegQuality: number
+  order: StackOrder
+  layout: Layout
 
   // Background
   bgSource: BackgroundSource
@@ -62,8 +71,9 @@ export interface StylePreset {
 
   // Layout
   padding: number
+  paddingY: number
   gap: number
-  fitMode: FitMode
+  frameFit: FrameFit
 
   // Photo treatment
   cornerRadius: number
@@ -84,15 +94,23 @@ export interface StylePreset {
   watermarkText: string
   watermarkSize: number
   watermarkOpacity: number
+  /** Optional logo, stored as a data URL so it survives a reload. */
+  watermarkLogo: string | null
+  watermarkLogoScale: number
+}
+
+/** A named style the user can switch between (feed look vs story look). */
+export interface SavedPreset {
+  id: string
+  name: string
+  preset: StylePreset
 }
 
 export interface ClusterSettings {
-  /** Photos within this many minutes of each other lean toward the same car. */
-  timeGapMinutes: number
-  /** Min cross-correlation (-1..1) for two shots to count as the same framing. */
-  nccThreshold: number
-  /** Min cross-correlation for the tighter before/after pairing pass. */
-  pairNccThreshold: number
-  /** Max chroma distance (0-1) before two shots are ruled different cars. */
-  chromaThreshold: number
+  /** A burst is one walk around the car — photos closer than this. */
+  burstGapMinutes: number
+  /** Bursts closer together than this belong to the same car. */
+  carGapMinutes: number
+  /** 0 trusts only how photos look; 1 trusts only walk-around order. */
+  orderWeight: number
 }

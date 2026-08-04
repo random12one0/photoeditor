@@ -8,6 +8,29 @@ interface Props {
   after: Photo
   preset: StylePreset
   maxWidth: number
+  /** Fill the parent instead of sizing to maxWidth. Used by the export grid. */
+  fill?: boolean
+}
+
+/** Decoded logos, keyed by data URL, so the preview doesn't re-decode per tick. */
+const logoCache = new Map<string, ImageBitmap>()
+
+async function getLogo(dataUrl: string | null): Promise<ImageBitmap | null> {
+  if (!dataUrl) return null
+  const hit = logoCache.get(dataUrl)
+  if (hit) return hit
+  try {
+    const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob())
+    // One logo at a time is plenty; drop anything stale.
+    for (const [k, v] of logoCache) {
+      v.close()
+      logoCache.delete(k)
+    }
+    logoCache.set(dataUrl, bmp)
+    return bmp
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -15,11 +38,11 @@ interface Props {
  *
  * Renders from the low-res proxies at a fraction of export size. Because every
  * spatial value in the preset is a percentage of canvas width, this is
- * proportionally identical to what the ZIP will contain.
+ * proportionally identical to what gets exported.
  */
-export default function PairPreview({ before, after, preset, maxWidth }: Props) {
+export default function PairPreview({ before, after, preset, maxWidth, fill }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -28,28 +51,31 @@ export default function PairPreview({ before, after, preset, maxWidth }: Props) 
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const [beforeBmp, afterBmp] = await Promise.all([
+          const [beforeBmp, afterBmp, logo] = await Promise.all([
             getProxyBitmap(before),
             getProxyBitmap(after),
+            getLogo(preset.watermarkLogo),
           ])
           if (cancelled) return
-
           const canvas = canvasRef.current
           if (!canvas) return
 
           const dpr = Math.min(2, window.devicePixelRatio || 1)
-          const { width, height } = canvasSize(preset.ratio, Math.round(maxWidth * 2 * dpr))
+          const { width, height } = canvasSize(
+            preset.ratio,
+            Math.round(maxWidth * 2 * dpr),
+          )
           canvas.width = width
           canvas.height = height
-          canvas.style.width = `${maxWidth}px`
-          canvas.style.height = `${Math.round((height / width) * maxWidth)}px`
-
-          renderComposite(canvas, { before: beforeBmp, after: afterBmp }, preset)
-          setError(null)
-        } catch (err) {
-          if (!cancelled) {
-            setError(err instanceof Error ? err.message : 'Preview failed')
+          if (!fill) {
+            canvas.style.width = `${maxWidth}px`
+            canvas.style.height = `${Math.round((height / width) * maxWidth)}px`
           }
+
+          renderComposite(canvas, { before: beforeBmp, after: afterBmp, logo }, preset)
+          setPending(false)
+        } catch {
+          if (!cancelled) setPending(false)
         }
       })()
     }, 60)
@@ -58,12 +84,13 @@ export default function PairPreview({ before, after, preset, maxWidth }: Props) 
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [before, after, preset, maxWidth])
+  }, [before, after, preset, maxWidth, fill])
 
   return (
-    <div className="preview-wrap">
-      <canvas ref={canvasRef} className="preview-canvas" />
-      {error && <p className="muted tiny">{error}</p>}
-    </div>
+    <canvas
+      ref={canvasRef}
+      className={`preview-canvas${pending ? ' loading' : ''}`}
+      aria-label="Preview of the finished image"
+    />
   )
 }

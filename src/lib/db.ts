@@ -6,7 +6,7 @@
  * and all the grouping decisions go into IndexedDB as you work.
  */
 
-import type { ClusterSettings, Group, Photo, StylePreset } from '../types'
+import type { ClusterSettings, Group, Photo, SavedPreset, StylePreset } from '../types'
 
 const DB_NAME = 'unbklok'
 const DB_VERSION = 1
@@ -167,5 +167,27 @@ export function loadClusterSettings(fallback: ClusterSettings): ClusterSettings 
     return { ...fallback, ...(JSON.parse(raw) as Partial<ClusterSettings>) }
   } catch {
     return fallback
+  }
+}
+
+const SAVED_KEY = 'unbklok:presets'
+
+/** Named looks the user can flip between — a feed style and a story style. */
+export function saveSavedPresets(list: SavedPreset[]): void {
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(list))
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadSavedPresets(): SavedPreset[] {
+  try {
+    const raw = localStorage.getItem(SAVED_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as SavedPreset[]) : []
+  } catch {
+    return []
   }
 }

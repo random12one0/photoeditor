@@ -1,6 +1,7 @@
 import exifr from 'exifr'
 import type { Photo } from '../types'
 import {
+  COARSE_GRID,
   LUMA_GRID,
   chromaSignature,
   colorSignature,
@@ -59,6 +60,7 @@ export async function ingestFiles(
       const hashGrid = extractGrid(bitmap, 9, 8)
       const colorGrid = extractGrid(bitmap, 32, 32)
       const structureGrid = extractGrid(bitmap, LUMA_GRID, LUMA_GRID)
+      const coarseGrid = extractGrid(bitmap, COARSE_GRID, COARSE_GRID)
       const proxyUrl = await bitmapToObjectUrl(bitmap)
       const { takenAt, approximate } = await readTakenAt(file)
 
@@ -75,6 +77,7 @@ export async function ingestFiles(
         colorSig: colorSignature(colorGrid),
         chromaSig: chromaSignature(colorGrid),
         lumaGrid: lumaGridFromImageData(structureGrid),
+        lumaGridCoarse: lumaGridFromImageData(coarseGrid),
         luma: meanLuma(colorGrid),
       })
 

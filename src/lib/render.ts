@@ -1,3 +1,4 @@
+import { scratch } from './canvasPool'
 import type { OutputRatio, StylePreset } from '../types'
 
 export const RATIOS: Record<OutputRatio, number> = {
@@ -7,27 +8,46 @@ export const RATIOS: Record<OutputRatio, number> = {
   '3:4': 3 / 4,
 }
 
+/**
+ * Defaults measured from the user's own exports (see test/measure.mjs), which
+ * were remarkably consistent across five collages:
+ *
+ *   side margin    8.71% of canvas width
+ *   top / bottom   4.73% / 4.68%
+ *   gap            1.56%       ← opened up here, by request
+ *   corner radius  0.47%
+ *   backdrop       heavy blur, mid-grey, only lightly darkened
+ *
+ * Two structural details from the same measurements, both of which the first
+ * version of this renderer got wrong: the finished car sits on TOP in all five,
+ * and the two photos keep their own aspect ratios rather than being cropped to
+ * a shared frame.
+ */
 export const DEFAULT_PRESET: StylePreset = {
   ratio: '4:5',
   exportSize: 2000,
   jpegQuality: 0.92,
 
+  order: 'after-first',
+  layout: 'stacked',
+
   bgSource: 'after',
-  bgBlur: 6,
-  bgDarken: 0.45,
-  bgZoom: 1.15,
-  bgSaturation: 1.1,
+  bgBlur: 8,
+  bgDarken: 0.28,
+  bgZoom: 1.18,
+  bgSaturation: 1.05,
 
-  padding: 6,
-  gap: 3.2,
-  fitMode: 'cover',
+  padding: 8.7,
+  paddingY: 4.7,
+  gap: 2.6,
+  frameFit: 'each',
 
-  cornerRadius: 2.4,
-  shadowBlur: 4.5,
-  shadowOpacity: 0.55,
-  shadowOffsetY: 1.2,
+  cornerRadius: 4.7,
+  shadowBlur: 9,
+  shadowOpacity: 0.42,
+  shadowOffsetY: 2.4,
   borderWidth: 0.18,
-  borderOpacity: 0.16,
+  borderOpacity: 0,
 
   showLabels: false,
   beforeLabel: 'BEFORE',
@@ -38,6 +58,8 @@ export const DEFAULT_PRESET: StylePreset = {
   watermarkText: '',
   watermarkSize: 1.9,
   watermarkOpacity: 0.55,
+  watermarkLogo: null,
+  watermarkLogoScale: 12,
 }
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
@@ -46,6 +68,8 @@ type AnyCanvas = HTMLCanvasElement | OffscreenCanvas
 export interface RenderInput {
   before: ImageBitmap
   after: ImageBitmap
+  /** Decoded logo, when the preset carries one. */
+  logo?: ImageBitmap | null
 }
 
 /** Canvas dimensions for a ratio at a given long-edge size. */
@@ -54,14 +78,6 @@ export function canvasSize(ratio: OutputRatio, longEdge: number) {
   return r <= 1
     ? { width: Math.round(longEdge * r), height: longEdge }
     : { width: longEdge, height: Math.round(longEdge / r) }
-}
-
-function makeCanvas(w: number, h: number): AnyCanvas {
-  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h)
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  return c
 }
 
 function roundRectPath(ctx: Ctx2D, x: number, y: number, w: number, h: number, r: number) {
@@ -95,25 +111,12 @@ function drawCover(
   ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
 }
 
-/** Draw a bitmap inside a box without cropping, letterboxing the remainder. */
-function drawContain(
-  ctx: Ctx2D,
-  img: ImageBitmap,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-) {
-  const scale = Math.min(w / img.width, h / img.height)
-  const dw = img.width * scale
-  const dh = img.height * scale
-  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
-}
-
 /**
- * Blurred, darkened backdrop. The blur is done on a small proxy and then scaled
- * up — a large ctx.filter blur on a 2000px canvas takes seconds on a phone,
- * whereas this is instant and visually identical once it's this soft.
+ * Blurred, darkened backdrop.
+ *
+ * The blur runs on a small proxy and is then scaled up: a large ctx.filter blur
+ * across a 2000px canvas takes seconds on a phone, while this is instant and,
+ * once the blur is this heavy, visually identical.
  */
 function drawBackdrop(
   ctx: Ctx2D,
@@ -127,12 +130,14 @@ function drawBackdrop(
   const sw = Math.max(2, Math.round(W * f))
   const sh = Math.max(2, Math.round(H * f))
 
-  const small = makeCanvas(sw, sh)
+  const small = scratch('backdrop-small', sw, sh)
   const sctx = small.getContext('2d') as Ctx2D
+  sctx.clearRect(0, 0, sw, sh)
   drawCover(sctx, img, 0, 0, sw, sh, preset.bgZoom)
 
-  const blurred = makeCanvas(sw, sh)
+  const blurred = scratch('backdrop-blur', sw, sh)
   const bctx = blurred.getContext('2d') as Ctx2D
+  bctx.clearRect(0, 0, sw, sh)
   const smallBlur = Math.max(0, (preset.bgBlur / 100) * W * f)
   const filters: string[] = []
   if (smallBlur > 0.2) filters.push(`blur(${smallBlur.toFixed(2)}px)`)
@@ -187,20 +192,12 @@ function drawFramedPhoto(
     ctx.restore()
   }
 
-  // Photo, clipped to the rounded frame.
   ctx.save()
   roundRectPath(ctx, x, y, w, h, radius)
   ctx.clip()
-  if (preset.fitMode === 'cover') {
-    drawCover(ctx, img, x, y, w, h)
-  } else {
-    ctx.fillStyle = 'rgba(0,0,0,0.35)'
-    ctx.fillRect(x, y, w, h)
-    drawContain(ctx, img, x, y, w, h)
-  }
+  drawCover(ctx, img, x, y, w, h)
   ctx.restore()
 
-  // Hairline border to lift the photo off the backdrop.
   const borderW = (preset.borderWidth / 100) * unit * 10
   if (preset.borderOpacity > 0 && borderW > 0) {
     ctx.save()
@@ -228,7 +225,7 @@ function drawLabel(
   ctx.font = `700 ${size}px ui-sans-serif, -apple-system, "Helvetica Neue", Arial, sans-serif`
   ctx.textBaseline = 'top'
   ctx.textAlign = 'left'
-  ctx.letterSpacing = `${size * 0.08}px`
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${size * 0.08}px`
   ctx.shadowColor = 'rgba(0,0,0,0.65)'
   ctx.shadowBlur = size * 0.5
   ctx.shadowOffsetY = size * 0.06
@@ -240,9 +237,9 @@ function drawLabel(
 /**
  * Compose one before/after image.
  *
- * Every spatial value in the preset is a percentage of the canvas width, so a
- * preview rendered at 600px and an export rendered at 2000px are pixel-for-pixel
- * proportional — what you see in the editor is what lands in the ZIP.
+ * Every spatial value in the preset is a percentage of canvas width, so a
+ * preview rendered at 320px and an export rendered at 2000px are proportionally
+ * identical — what the editor shows is what lands in the export.
  */
 export function renderComposite(
   canvas: AnyCanvas,
@@ -267,47 +264,104 @@ export function renderComposite(
     ctx.restore()
   }
 
+  // The finished car goes on top by default — that's how the reference edits
+  // are laid out, and it's what reads as the payoff shot.
+  const [top, bottom] =
+    preset.order === 'after-first'
+      ? [input.after, input.before]
+      : [input.before, input.after]
+
   const padX = (preset.padding / 100) * W
+  const padY = (preset.paddingY / 100) * W
   const gap = (preset.gap / 100) * W
   const availW = W - padX * 2
-  const availH = H - padX * 2
+  const availH = H - padY * 2
 
-  // Both frames share one aspect so the pair reads as a matched set. Averaging
-  // the two sources keeps the crop honest when the shots differ slightly.
-  const aspect =
-    (input.before.width / input.before.height + input.after.width / input.after.height) / 2
+  const aspectA = top.width / top.height
+  const aspectB = bottom.width / bottom.height
 
-  let frameW = availW
-  let frameH = frameW / aspect
-  if (frameH * 2 + gap > availH) {
-    frameH = (availH - gap) / 2
-    frameW = Math.min(availW, frameH * aspect)
+  /* Side-by-side is the same problem rotated, so solve it in the long axis of
+     whichever arrangement is in play rather than duplicating the maths. */
+  const sideBySide = preset.layout === 'side-by-side'
+  const spanAvail = sideBySide ? availW : availH
+  const crossAvail = sideBySide ? availH : availW
+
+  let cross: number
+  let spanA: number
+  let spanB: number
+
+  if (preset.frameFit === 'match') {
+    // One shared frame, both photos cropped into it. Reads as a matched set, at
+    // the cost of trimming whichever shot is the odd shape.
+    const aspect = (aspectA + aspectB) / 2
+    cross = crossAvail
+    let span = sideBySide ? cross * aspect : cross / aspect
+    if (span * 2 + gap > spanAvail) {
+      span = (spanAvail - gap) / 2
+      cross = Math.min(crossAvail, sideBySide ? span / aspect : span * aspect)
+    }
+    spanA = span
+    spanB = span
+  } else {
+    // Each photo keeps its own shape at a shared cross-axis size — no cropping.
+    cross = crossAvail
+    spanA = sideBySide ? cross * aspectA : cross / aspectA
+    spanB = sideBySide ? cross * aspectB : cross / aspectB
+    const total = spanA + spanB + gap
+    if (total > spanAvail) {
+      const k = (spanAvail - gap) / (spanA + spanB)
+      cross *= k
+      spanA *= k
+      spanB *= k
+    }
   }
 
-  const stackH = frameH * 2 + gap
-  const x = (W - frameW) / 2
-  const yTop = (H - stackH) / 2
-  const yBottom = yTop + frameH + gap
+  const stack = spanA + spanB + gap
+  let boxA: [number, number, number, number]
+  let boxB: [number, number, number, number]
 
-  drawFramedPhoto(ctx, input.before, x, yTop, frameW, frameH, preset, unit)
-  drawFramedPhoto(ctx, input.after, x, yBottom, frameW, frameH, preset, unit)
+  if (sideBySide) {
+    const y = (H - cross) / 2
+    const xA = (W - stack) / 2
+    boxA = [xA, y, spanA, cross]
+    boxB = [xA + spanA + gap, y, spanB, cross]
+  } else {
+    const x = (W - cross) / 2
+    const yA = (H - stack) / 2
+    boxA = [x, yA, cross, spanA]
+    boxB = [x, yA + spanA + gap, cross, spanB]
+  }
+
+  drawFramedPhoto(ctx, top, ...boxA, preset, unit)
+  drawFramedPhoto(ctx, bottom, ...boxB, preset, unit)
 
   if (preset.showLabels) {
-    drawLabel(ctx, preset.beforeLabel, x, yTop, preset, unit)
-    drawLabel(ctx, preset.afterLabel, x, yBottom, preset, unit)
+    const labelA = preset.order === 'after-first' ? preset.afterLabel : preset.beforeLabel
+    const labelB = preset.order === 'after-first' ? preset.beforeLabel : preset.afterLabel
+    drawLabel(ctx, labelA, boxA[0], boxA[1], preset, unit)
+    drawLabel(ctx, labelB, boxB[0], boxB[1], preset, unit)
   }
 
-  if (preset.watermarkText) {
+  if (input.logo) {
+    const logoW = (preset.watermarkLogoScale / 100) * W
+    const logoH = (logoW / input.logo.width) * input.logo.height
+    ctx.save()
+    ctx.globalAlpha = preset.watermarkOpacity
+    ctx.shadowColor = 'rgba(0,0,0,0.45)'
+    ctx.shadowBlur = logoW * 0.08
+    ctx.drawImage(input.logo, (W - logoW) / 2, H - padY - logoH, logoW, logoH)
+    ctx.restore()
+  } else if (preset.watermarkText) {
     const size = (preset.watermarkSize / 100) * unit * 10
     ctx.save()
     ctx.font = `600 ${size}px ui-sans-serif, -apple-system, "Helvetica Neue", Arial, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'alphabetic'
-    ctx.letterSpacing = `${size * 0.12}px`
+    if ('letterSpacing' in ctx) ctx.letterSpacing = `${size * 0.12}px`
     ctx.shadowColor = 'rgba(0,0,0,0.6)'
     ctx.shadowBlur = size * 0.6
     ctx.fillStyle = `rgba(255,255,255,${preset.watermarkOpacity})`
-    ctx.fillText(preset.watermarkText, W / 2, H - padX * 0.42)
+    ctx.fillText(preset.watermarkText, W / 2, H - Math.max(padY, size) * 0.9)
     ctx.restore()
   }
 }

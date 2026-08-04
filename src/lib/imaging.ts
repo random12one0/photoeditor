@@ -1,5 +1,9 @@
 /** Image decoding, downscaling and proxy generation. */
 
+import { canvasToBlob, scratch } from './canvasPool'
+
+export { canvasToBlob }
+
 /** Longest edge of the in-browser proxy. Big enough to preview, small enough
  *  that 150 of them don't exhaust mobile Safari. */
 export const PROXY_MAX_EDGE = 1400
@@ -39,20 +43,19 @@ export async function decodeFull(file: File): Promise<ImageBitmap> {
   return createImageBitmap(file, { imageOrientation: 'from-image' })
 }
 
-function makeCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement {
-  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h)
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  return c
-}
-
-/** Squash a bitmap down to a tiny grid and hand back its raw pixels. */
+/**
+ * Squash a bitmap down to a tiny grid and hand back its raw pixels.
+ *
+ * Uses the shared scratch canvas: this runs three times per imported photo, and
+ * allocating a canvas each time is what exhausts Safari's canvas memory budget
+ * partway through a large import.
+ */
 export function extractGrid(bitmap: ImageBitmap, w: number, h: number): ImageData {
-  const canvas = makeCanvas(w, h)
+  const canvas = scratch('grid', w, h)
   const ctx = canvas.getContext('2d', {
     willReadFrequently: true,
   }) as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D
+  ctx.clearRect(0, 0, w, h)
   ctx.drawImage(bitmap, 0, 0, w, h)
   return ctx.getImageData(0, 0, w, h)
 }
@@ -62,40 +65,12 @@ export async function bitmapToObjectUrl(
   bitmap: ImageBitmap,
   quality = 0.85,
 ): Promise<string> {
-  const canvas = makeCanvas(bitmap.width, bitmap.height)
+  const canvas = scratch('proxy', bitmap.width, bitmap.height)
   const ctx = canvas.getContext('2d') as
     | OffscreenCanvasRenderingContext2D
     | CanvasRenderingContext2D
+  ctx.clearRect(0, 0, bitmap.width, bitmap.height)
   ctx.drawImage(bitmap, 0, 0)
-
-  let blob: Blob
-  if (canvas instanceof OffscreenCanvas) {
-    blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
-  } else {
-    blob = await new Promise<Blob>((resolve, reject) => {
-      ;(canvas as HTMLCanvasElement).toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('toBlob failed'))),
-        'image/jpeg',
-        quality,
-      )
-    })
-  }
+  const blob = await canvasToBlob(canvas, 'image/jpeg', quality)
   return URL.createObjectURL(blob)
-}
-
-export async function canvasToBlob(
-  canvas: OffscreenCanvas | HTMLCanvasElement,
-  type: string,
-  quality: number,
-): Promise<Blob> {
-  if (canvas instanceof OffscreenCanvas) {
-    return canvas.convertToBlob({ type, quality })
-  }
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('toBlob failed'))),
-      type,
-      quality,
-    )
-  })
 }

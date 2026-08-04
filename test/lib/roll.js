@@ -6,6 +6,7 @@
  */
 
 import {
+  COARSE_GRID,
   LUMA_GRID,
   chromaSignature,
   colorSignature,
@@ -193,6 +194,7 @@ export function makePhoto(spec, cfg = {}) {
   const hashGrid = grid(9, 8)
   const colorGrid = grid(32, 32)
   const structureGrid = grid(LUMA_GRID, LUMA_GRID)
+  const coarseGrid = grid(COARSE_GRID, COARSE_GRID)
 
   return {
     id: spec.id,
@@ -207,6 +209,7 @@ export function makePhoto(spec, cfg = {}) {
     colorSig: colorSignature(colorGrid),
     chromaSig: chromaSignature(colorGrid),
     lumaGrid: lumaGridFromImageData(structureGrid),
+    lumaGridCoarse: lumaGridFromImageData(coarseGrid),
     luma: meanLuma(colorGrid),
   }
 }

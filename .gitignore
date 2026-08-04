@@ -5,3 +5,8 @@ dist/
 .vite/
 .netlify/
 test/output/
+
+# Real photographs of real cars, license plates included. Not for a public repo.
+test/fixtures/reference/
+test/fixtures/photos/
+tsconfig.tsbuildinfo

@@ -242,17 +242,17 @@ async function main() {
     })
     check('files injected', injected, expectedFiles)
 
-    await page.waitForSelector('.groups-view', { timeout: 60000 })
-    const photoCount = await page.locator('.group-card .thumb').count()
+    await page.waitForSelector('[data-view=cars]', { timeout: 60000 })
+    const photoCount = await page.locator('[data-view=cars] .thumb').count()
     check('photos imported', photoCount, expectedFiles)
 
     /* ----------------------------------------------------------- grouping */
     console.log('\n[2] Grouping')
-    const groupCount = await page.locator('.group-card').count()
+    const groupCount = await page.locator('[data-view=cars] .card').count()
     check('cars detected', groupCount, CARS)
 
     // Each car's before batch and after batch must have been stitched together.
-    const groupSizes = await page.$$eval('.group-card', (cards) =>
+    const groupSizes = await page.$$eval('[data-view=cars] .card', (cards) =>
       cards.map((c) => c.querySelectorAll('.thumb').length),
     )
     checkThat(
@@ -262,7 +262,7 @@ async function main() {
     )
 
     // And no photo from one car leaked into another.
-    const namesPerGroup = await page.$$eval('.group-card', (cards) =>
+    const namesPerGroup = await page.$$eval('[data-view=cars] .card', (cards) =>
       cards.map((c) =>
         [...c.querySelectorAll('.thumb')].map((t) => t.getAttribute('title')?.split(' ·')[0]),
       ),
@@ -275,7 +275,7 @@ async function main() {
 
     /* ------------------------------------------------------------ pairing */
     console.log('\n[3] Pairing')
-    const suggestedPairs = await page.$$eval('.group-card .pill.accent', (pills) =>
+    const suggestedPairs = await page.$$eval('[data-view=cars] .pill.good', (pills) =>
       pills.map((p) => parseInt(p.textContent ?? '0', 10)),
     )
     check(
@@ -284,8 +284,8 @@ async function main() {
       CARS * ANGLES_PER_CAR,
     )
 
-    await page.click('.btn.primary:has-text("Pair them up")')
-    await page.waitForSelector('.pair-view')
+    await page.click('[data-view=cars] .btn.primary')
+    await page.waitForSelector('[data-view=pairs]')
 
     // Confirm every suggestion using only the keyboard, the way a real session
     // would run, then read back exactly which shots got married to which.
@@ -296,14 +296,14 @@ async function main() {
       await page.locator('.group-strip .chip').nth(car).click()
       await page.waitForTimeout(150)
 
-      while ((await page.locator('.review-images').count()) > 0) {
+      while ((await page.locator('[data-testid=review-images]').count()) > 0) {
         totalSuggestions++
         await page.keyboard.press('ArrowRight') // confirm
         await page.waitForTimeout(90)
         if (totalSuggestions > 200) throw new Error('pair queue never drained')
       }
 
-      const pairs = await page.$$eval('.manual .pair-row', (rows) =>
+      const pairs = await page.$$eval('.pair-row', (rows) =>
         rows.map((r) => {
           const imgs = r.querySelectorAll('img[data-photo]')
           return { before: imgs[0]?.dataset.photo, after: imgs[1]?.dataset.photo }
@@ -333,13 +333,13 @@ async function main() {
       wrong.length ? JSON.stringify(wrong.slice(0, 3)) : `${allPairs.length}/${allPairs.length} exact`,
     )
 
-    await page.click('.stage-tab:has-text("Cars")')
-    await page.waitForSelector('.groups-view')
+    await page.click('[data-step=cars]')
+    await page.waitForSelector('[data-view=cars]')
     const pairedBadges = await page.locator('.thumb-badge:not(.warn)').count()
     check('photos marked paired', pairedBadges, CARS * ANGLES_PER_CAR * 2)
 
     const pairReport = await page.evaluate(() => {
-      const groups = [...document.querySelectorAll('.group-card')]
+      const groups = [...document.querySelectorAll('[data-view=cars] .card')]
       return groups.map((g) => ({
         singles: [...g.querySelectorAll('.thumb')]
           .filter((t) => !t.querySelector('.thumb-badge:not(.warn)'))
@@ -358,8 +358,8 @@ async function main() {
 
     /* -------------------------------------------------------------- style */
     console.log('\n[4] Style + preview render')
-    await page.click('.stage-tab:has-text("Style")')
-    await page.waitForSelector('.style-view')
+    await page.click('[data-step=style]')
+    await page.waitForSelector('[data-view=style]')
     await page.waitForTimeout(700)
 
     const previewStats = await page.evaluate(() => {
@@ -401,7 +401,7 @@ async function main() {
       return c.getContext('2d').getImageData(0, 0, 40, 40).data.join(',')
     })
     await page.evaluate(() => {
-      const sliders = [...document.querySelectorAll('.style-controls input[type=range]')]
+      const sliders = [...document.querySelectorAll('.fieldset input[type=range]')]
       const darken = sliders.find((s) => s.closest('label')?.textContent?.includes('Darken'))
       const setter = Object.getOwnPropertyDescriptor(
         window.HTMLInputElement.prototype,
@@ -420,11 +420,11 @@ async function main() {
 
     /* ------------------------------------------------------------- export */
     console.log('\n[5] Export')
-    await page.click('.stage-tab:has-text("Export")')
-    await page.waitForSelector('.export-view')
+    await page.click('[data-step=export]')
+    await page.waitForSelector('[data-view=export]')
 
     const downloadPromise = page.waitForEvent('download', { timeout: 120000 })
-    await page.click('.view-head .btn.primary')
+    await page.click('.actionbar .btn.primary')
     const download = await downloadPromise
     const path = await download.path()
 
@@ -470,10 +470,10 @@ async function main() {
     /* --------------------------------------------------------- resilience */
     console.log('\n[6] Session restore')
     await page.reload()
-    await page.waitForSelector('.groups-view', { timeout: 60000 })
-    const restoredPhotos = await page.locator('.group-card .thumb').count()
+    await page.waitForSelector('[data-view=cars]', { timeout: 60000 })
+    const restoredPhotos = await page.locator('[data-view=cars] .thumb').count()
     check('photos restored after reload', restoredPhotos, expectedFiles)
-    const restoredGroups = await page.locator('.group-card').count()
+    const restoredGroups = await page.locator('[data-view=cars] .card').count()
     check('cars restored after reload', restoredGroups, CARS)
 
     /* ------------------------------------------------------------- errors */

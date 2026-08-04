@@ -97,6 +97,46 @@ export function ncc(a: number[], b: number[]): number {
   return Math.max(-1, Math.min(1, dot / a.length))
 }
 
+/**
+ * Cross-correlation maximised over small shifts.
+ *
+ * Plain NCC assumes the two frames line up, and measured against real detailing
+ * photos they emphatically do not: the photographer stands somewhere slightly
+ * different when they come back ninety minutes later, so the whole scene
+ * translates and rescales a little. On the reference set, sliding one grid over
+ * the other lifted true-pair scores from a median of 0.24 to 0.34 and, more
+ * usefully, pulled the worst case up from -0.10 to 0.25 — turning a signal that
+ * was indistinguishable from noise into one that at least ranks correctly.
+ */
+export function shiftedNcc(
+  a: number[],
+  b: number[],
+  size: number,
+  maxShift = 2,
+): number {
+  if (a.length !== size * size || b.length !== size * size) return ncc(a, b)
+
+  let best = -1
+  for (let dy = -maxShift; dy <= maxShift; dy++) {
+    for (let dx = -maxShift; dx <= maxShift; dx++) {
+      let dot = 0
+      let n = 0
+      for (let y = 0; y < size; y++) {
+        const yb = y + dy
+        if (yb < 0 || yb >= size) continue
+        for (let x = 0; x < size; x++) {
+          const xb = x + dx
+          if (xb < 0 || xb >= size) continue
+          dot += a[y * size + x] * b[yb * size + xb]
+          n++
+        }
+      }
+      if (n > 0) best = Math.max(best, dot / n)
+    }
+  }
+  return Math.max(-1, Math.min(1, best))
+}
+
 const POPCOUNT = new Uint8Array(256)
 for (let i = 0; i < 256; i++) {
   POPCOUNT[i] = (i & 1) + POPCOUNT[i >> 1]
@@ -228,19 +268,50 @@ export interface Fingerprint {
   dhash: string
   chromaSig: number[]
   lumaGrid: number[]
+  lumaGridCoarse: number[]
+}
+
+export const COARSE_GRID = 8
+
+/**
+ * Combined visual similarity, 0-1.
+ *
+ * Weighted from what actually separates the classes on real photographs. The
+ * coarse shifted grid is the strongest single term there, because it tolerates
+ * the framing drift between two handheld shots; the fine grid still helps when
+ * the two shots do line up; chromaticity carries real weight because the paint
+ * and the surroundings stay the same colour even when the framing moves.
+ *
+ * Note the honest ceiling: on real before/after pairs this score lands around
+ * 0.5-0.7 while unrelated shots reach 0.5, so it ranks well but cannot be used
+ * as a hard gate. Suggestions are therefore ordered by it, not filtered by it.
+ */
+export function similarity(a: Fingerprint, b: Fingerprint): number {
+  const coarse = (shiftedNcc(a.lumaGridCoarse, b.lumaGridCoarse, COARSE_GRID, 2) + 1) / 2
+  const fine = (shiftedNcc(a.lumaGrid, b.lumaGrid, LUMA_GRID, 3) + 1) / 2
+  const chroma = 1 - chromaDistance(a.chromaSig, b.chromaSig)
+  const hash = 1 - hamming(a.dhash, b.dhash) / 64
+  return coarse * 0.4 + fine * 0.25 + chroma * 0.25 + hash * 0.1
 }
 
 /**
- * Combined similarity, 0-1 where 1 is "these are the same shot".
+ * "Are these the same car?" — as opposed to `similarity`, which asks "are these
+ * the same shot?".
  *
- * Cross-correlation does the heavy lifting; chromaticity is the tie-breaker
- * that stops two different cars shot from the same spot in the same bay from
- * reading as a pair; dHash contributes a small amount of independent structural
- * evidence.
+ * These need different evidence, and conflating them was a measurable mistake.
+ * Structure answers the framing question, and framing is exactly what two
+ * *different* cars share when they're photographed from the same spot: on the
+ * bay fixtures, a different car at the same angle correlates as strongly as a
+ * true before/after pair does (0.957-0.997 against 0.96-0.98). Leaning on
+ * structure to decide car identity therefore actively misleads.
+ *
+ * Paint colour and surroundings are what actually persist across a wash and
+ * differ between cars, so chromaticity leads here. Structure still contributes,
+ * because a car shot in the same place twice does share a backdrop.
  */
-export function similarity(a: Fingerprint, b: Fingerprint): number {
-  const structure = (ncc(a.lumaGrid, b.lumaGrid) + 1) / 2
+export function carSimilarity(a: Fingerprint, b: Fingerprint): number {
   const chroma = 1 - chromaDistance(a.chromaSig, b.chromaSig)
+  const coarse = (shiftedNcc(a.lumaGridCoarse, b.lumaGridCoarse, COARSE_GRID, 2) + 1) / 2
   const hash = 1 - hamming(a.dhash, b.dhash) / 64
-  return structure * 0.6 + chroma * 0.28 + hash * 0.12
+  return chroma * 0.6 + coarse * 0.28 + hash * 0.12
 }
