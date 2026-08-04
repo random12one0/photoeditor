@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ClusterSettings, Group, Photo } from '../types'
+import { DEFAULT_CLUSTER_SETTINGS } from '../lib/cluster'
 import Icon from './Icon'
 
 /** Minutes as something readable at a glance. */
@@ -156,7 +157,8 @@ export default function GroupsView({
                   />
                   <span className="tiny dim">
                     Longer than you leave a car mid-job, shorter than the gap before the
-                    next one.
+                    next one. If two cars land together, tick their photos and tap
+                    Split — that's cheaper than one car breaking into six.
                   </span>
                 </label>
 
@@ -220,9 +222,22 @@ export default function GroupsView({
                     leave it low if you don't.
                   </span>
                 </label>
-                <button className="btn" onClick={() => onRegroup(draft)}>
-                  Re-group everything
-                </button>
+                <div className="field-actions">
+                  <button className="btn" onClick={() => onRegroup(draft)}>
+                    Re-group everything
+                  </button>
+                  {/* A way back out. These four numbers interact, and someone who
+                      has moved all of them has no way to find the tested set again. */}
+                  <button
+                    className="btn ghost"
+                    disabled={
+                      JSON.stringify(draft) === JSON.stringify(DEFAULT_CLUSTER_SETTINGS)
+                    }
+                    onClick={() => setDraft({ ...DEFAULT_CLUSTER_SETTINGS })}
+                  >
+                    Reset
+                  </button>
+                </div>
               </div>
             </div>
           )}

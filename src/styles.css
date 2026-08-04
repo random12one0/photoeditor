@@ -1043,6 +1043,14 @@ kbd {
   gap: var(--s2);
   font-size: 0.85rem;
 }
+/* The primary action takes the room; the escape hatch beside it stays small. */
+.field-actions {
+  display: flex;
+  gap: var(--s2);
+}
+.field-actions .btn:first-child {
+  flex: 1;
+}
 .field-label {
   display: flex;
   justify-content: space-between;
