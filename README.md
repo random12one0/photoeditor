@@ -196,5 +196,19 @@ src/lib/share.ts       Web Share API, clipboard, haptics
 
 ## Deploying
 
-Netlify config is in `netlify.toml` (build `npm run build`, publish `dist`).
-Any static host works; the app is entirely client-side.
+Everything is wired up; both routes need one switch flipped by hand, because
+neither can be enabled through an API from a sandbox.
+
+**GitHub Pages** — `.github/workflows/deploy.yml` builds and publishes on every
+push to the default branch. Enable it once at
+**Settings → Pages → Source → GitHub Actions**, then re-run the workflow. The
+site lands at `https://<user>.github.io/<repo>/`.
+
+**Netlify** — `netlify.toml` already carries the build command and publish
+directory, so **Add new site → Import an existing project → GitHub** picks it up
+with nothing to configure. (Deploying through Netlify's build API from CI was
+attempted and returns 403 for this account; connecting the repository in the UI
+avoids that path entirely.)
+
+Any static host works — the app is entirely client-side, so `npm run build` and
+serving `dist/` is the whole deployment.
