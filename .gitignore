@@ -10,3 +10,4 @@ test/output/
 test/fixtures/reference/
 test/fixtures/photos/
 tsconfig.tsbuildinfo
+dist-single/

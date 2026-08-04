@@ -199,6 +199,10 @@ src/lib/share.ts       Web Share API, clipboard, haptics
 Everything is wired up; both routes need one switch flipped by hand, because
 neither can be enabled through an API from a sandbox.
 
+`npm run build:single` produces `dist-single/index.html` — the whole app inlined
+into one self-contained file, which can be opened straight off disk or dropped
+on any host with no build step at all.
+
 **GitHub Pages** — `.github/workflows/deploy.yml` builds and publishes on every
 push to the default branch. Enable it once at
 **Settings → Pages → Source → GitHub Actions**, then re-run the workflow. The
