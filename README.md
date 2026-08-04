@@ -140,10 +140,11 @@ thumbnails — tap one to swap it in — and still export with their car.
 
 ## Measured accuracy
 
-Five suites. `npm run test:assign` checks the assignment solver against brute
-force; `npm run test:accuracy` scores eight synthetic workflows; `npm run
-test:real`, `npm run test:samecar` and `npm run test:takes` run the whole
-pipeline over real photographs.
+Seven suites. `npm run test:assign` and `npm run test:readahead` check the
+assignment solver and the import read-ahead directly; `npm run test:accuracy`
+scores eight synthetic workflows; `npm run test:real`, `npm run test:samecar`,
+`npm run test:takes` and `npm run test:handpair` run the whole pipeline over real
+photographs.
 
 The one that matters most is `test:samecar`, because it is the bug report:
 eight photos of a single Jeep across one job, with ground truth established by
@@ -203,8 +204,14 @@ angle drifts.
 
    When the same angle was shot more than once, a strip of thumbnails under the
    photo shows the other takes with the sharpest already picked — tap another to
-   swap it in. Anything left unpaired can be matched by tapping one photo then
-   its partner, and still exports with its car.
+   swap it in.
+
+   Whatever is left over drops into **Pair the rest**, below the card. Tap the
+   before shot, then tap its after — that order decides which is which, and the
+   panel says which step you're on. Tiles are large and every one opens full
+   screen, because the photos that end up here are the ones the matcher couldn't
+   place, and those are disproportionately interiors that nobody can identify
+   from a thumbnail. Anything you leave alone still exports with its car.
 4. **Style** — set the look once, with a live preview. Save named presets.
 5. **Export** — share sheet straight to Instagram or Photos, or a ZIP.
 
@@ -231,6 +238,15 @@ the only route — NN/G is clear that swipe-only actions aren't discoverable.
 Every spatial value in a style preset is a percentage of canvas width, so the
 320px preview and the 2000px export are proportionally identical.
 
+Importing reads each file once, with three reads in flight. It used to read
+every photo twice — once to decode and once for EXIF — strictly one at a time.
+That is invisible when the photos are on the device and dominant when they are
+not: a photo kept in iCloud has to be downloaded before its bytes can be read,
+so a 150-photo import was 300 serial network round trips with the CPU idle
+throughout. Decoding stays sequential, because decoding a 12MP photo spikes
+memory and doing many at once is what kills the tab on iOS. `npm run
+test:readahead` simulates the latency and measures the overlap.
+
 Canvases are pooled rather than allocated per operation. iOS Safari caps total
 canvas memory around 384MB and is notorious for holding backing stores after
 the JS object is unreachable; allocating per call meant three per imported photo
@@ -251,6 +267,8 @@ npm run test:assign      # the assignment solver against brute force
 npm run test:real        # the whole pipeline over real detailing photos
 npm run test:samecar     # the bug report: one car, one job, eight real photos
 npm run test:takes       # three shots of one angle — does the sharpest win?
+npm run test:handpair    # pairing the leftovers by hand
+npm run test:readahead   # import read-ahead, with the file latency simulated
 npm run test:accuracy    # precision/recall across 8 adversarial scenarios
 npm run test:diagnose    # distance distributions on synthetic fixtures
 npm run test:diagnose:real  # …and on real photos. Run before touching a threshold.
@@ -278,7 +296,7 @@ src/lib/cluster.ts     car grouping on the clock, take collapsing, pair suggesti
 src/lib/assign.ts      optimal one-to-one assignment (Hungarian)
 src/lib/render.ts      the composite renderer
 src/lib/exporter.ts    full-resolution rendering, ZIP and share-sheet packing
-src/lib/ingest.ts      decode, downscale, EXIF, fingerprint
+src/lib/ingest.ts      read-ahead, decode, downscale, EXIF, fingerprint
 src/lib/canvasPool.ts  shared scratch canvases
 src/lib/db.ts          IndexedDB session persistence
 src/lib/share.ts       Web Share API, clipboard, haptics

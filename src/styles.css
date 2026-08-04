@@ -513,6 +513,12 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ingest-note {
+  text-align: center;
+  text-wrap: balance;
+  margin: 0;
+  max-width: 34ch;
+}
 
 .bar {
   width: 100%;
@@ -871,6 +877,164 @@ kbd {
   letter-spacing: 0.09em;
   color: var(--text-3);
   padding: 0 2px;
+}
+
+.howto {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+  text-wrap: pretty;
+}
+.howto strong {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* Pairing the leftovers by hand.
+   Unlike the review card this is not a yes/no question, so it gets room: the
+   photos that reach it are the ones nobody could identify from a thumbnail. */
+.handpair-steps {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  margin-bottom: var(--s2);
+}
+.handpair-step {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 0.85rem;
+}
+.handpair-step > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.handpair-step s {
+  color: var(--text-3);
+}
+/* The live step is the bright one; both others sit at the muted default. */
+.handpair-steps:not(.step2) .handpair-step:first-child .step-num,
+.handpair-steps.step2 .handpair-step:last-child .step-num {
+  background: var(--text);
+  color: var(--bg);
+}
+.handpair-hint {
+  margin: 0 0 var(--s3);
+  text-wrap: pretty;
+}
+
+.handpair-grid {
+  display: grid;
+  /* Two per row on a phone. These are the photos you cannot recognise small. */
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--s3);
+}
+.handpair-tile {
+  display: grid;
+  gap: 4px;
+}
+.handpair-pick {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.14s var(--ease);
+}
+.handpair-pick img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.handpair-tile.picked .handpair-pick {
+  border-color: var(--text);
+}
+.handpair-badge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 3px 7px;
+  border-radius: var(--r-sm);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+.handpair-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  font-size: 0.7rem;
+  padding-left: 2px;
+}
+.handpair-zoom {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: -4px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.handpair-zoom:hover,
+.handpair-zoom:focus-visible {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: var(--s3);
+  padding: var(--s3);
+  padding-bottom: max(var(--s3), env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.92);
+}
+.lightbox img {
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+}
+.lightbox-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: min(560px, 100%);
+  margin: 0 auto;
+}
+.lightbox-meta {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #fff;
+}
+.lightbox-meta span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Other takes of the same angle. Deliberately quiet — most pairs have none,

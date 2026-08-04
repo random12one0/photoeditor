@@ -236,7 +236,7 @@ check(
 
 console.log('\n[7] Nothing was thrown away')
 const leftover = await page.evaluate(
-  () => document.querySelectorAll('.thumb-grid .thumb').length,
+  () => document.querySelectorAll("[data-testid=pair-by-hand] .handpair-tile").length,
 )
 /* Two rejected takes per before angle, plus the after shots that genuinely have
    no partner — in this set the two centre-console photos. */

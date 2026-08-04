@@ -122,9 +122,26 @@ export default function GroupsView({
           <div className="section-head" style={{ marginTop: 0 }}>
             <div>
               <h2>Cars</h2>
-              <p className="tiny muted">
-                Tap photos to move them. Tick two cars to merge.
-              </p>
+              {/* Three separate gestures with three separate outcomes. Naming
+                  each one and what it does beats a two-clause summary — this is
+                  the screen people reach for when the automatic grouping got
+                  something wrong, so it has to be readable under mild
+                  frustration. */}
+              <ul className="tiny muted howto">
+                <li>
+                  <strong>Wrong car?</strong> Tap those photos, then{' '}
+                  <strong>Split out</strong> for a new car or{' '}
+                  <strong>Move to…</strong> for an existing one.
+                </li>
+                <li>
+                  <strong>One car split in two?</strong> Tick both cars’ boxes, then{' '}
+                  <strong>Merge</strong>.
+                </li>
+                <li>
+                  <strong>Wrong time?</strong> Tap one photo, then <strong>Time</strong>. A{' '}
+                  <span className="mono">~</span> means the time was guessed.
+                </li>
+              </ul>
             </div>
             <button className="btn ghost sm" onClick={() => setShowSettings((s) => !s)}>
               <Icon name="sliders" size={16} />

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { haptic } from '../lib/share'
 import type { Group, Pair, Photo, StylePreset } from '../types'
 import Icon from './Icon'
+import PairByHand from './PairByHand'
 import PairPreview from './PairPreview'
 
 interface Props {
@@ -84,7 +85,6 @@ export default function PairView({
   notify,
 }: Props) {
   const [groupIndex, setGroupIndex] = useState(0)
-  const [manualPick, setManualPick] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [drag, setDrag] = useState(0)
 
@@ -217,46 +217,36 @@ export default function PairView({
     [group, onUpdateGroup],
   )
 
-  const handleManualPick = useCallback(
-    (photoId: string) => {
+  /**
+   * Pair two leftovers by hand.
+   *
+   * Tap order decides: first is the before, second is the after. It used to
+   * infer that from capture time, which is right most of the time and silent
+   * when it isn't — and "before first, after second" is a rule someone can hold
+   * in their head and correct against.
+   */
+  const pairByHand = useCallback(
+    (beforeId: string, afterId: string) => {
       if (!group) return
-      if (manualPick === null) {
-        setManualPick(photoId)
-        return
-      }
-      if (manualPick === photoId) {
-        setManualPick(null)
-        return
-      }
-      const a = photoMap.get(manualPick)
-      const b = photoMap.get(photoId)
-      if (!a || !b) {
-        setManualPick(null)
-        return
-      }
-      const [before, after] = a.takenAt <= b.takenAt ? [a, b] : [b, a]
       const pair: Pair = {
         id: `manual${Date.now().toString(36)}_${manualCounter++}`,
-        beforeId: before.id,
-        afterId: after.id,
+        beforeId,
+        afterId,
         confidence: 1,
         confirmed: true,
       }
-      haptic(10)
       onUpdateGroup(group.id, (g) => ({ ...g, pairs: [...g.pairs, pair] }), 'pair by hand')
-      setManualPick(null)
+      notify('Paired', true)
     },
-    [group, manualPick, photoMap, onUpdateGroup],
+    [group, onUpdateGroup, notify],
   )
 
   const nextGroup = useCallback(() => {
     setGroupIndex((i) => Math.min(i + 1, groups.length - 1))
-    setManualPick(null)
   }, [groups.length])
 
   const prevGroup = useCallback(() => {
     setGroupIndex((i) => Math.max(i - 1, 0))
-    setManualPick(null)
   }, [])
 
   /* -------------------------------------------------------------------- swipe */
@@ -381,7 +371,6 @@ export default function PairView({
                   aria-pressed={i === groupIndex}
                   onClick={() => {
                     setGroupIndex(i)
-                    setManualPick(null)
                   }}
                 >
                   {g.name}
@@ -508,32 +497,7 @@ export default function PairView({
             </div>
           )}
 
-          {unpaired.length > 0 && (
-            <section className="section">
-              <div className="section-head">
-                <h3>
-                  Unpaired
-                  {manualPick && <span className="muted"> — tap its partner</span>}
-                </h3>
-                <span className="pill">{unpaired.length}</span>
-              </div>
-              <p className="tiny dim" style={{ marginBottom: 12 }}>
-                Tap one photo then the matching one. The earlier shot becomes the before.
-                Anything left alone still exports with this car.
-              </p>
-              <div className="thumb-grid">
-                {unpaired.map((photo) => (
-                  <button
-                    key={photo.id}
-                    className={`thumb${manualPick === photo.id ? ' picked' : ''}`}
-                    onClick={() => handleManualPick(photo.id)}
-                  >
-                    <img src={photo.proxyUrl} alt={photo.name} loading="lazy" />
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
+          <PairByHand photos={unpaired} onPair={pairByHand} />
 
           {confirmed.length > 0 && (
             <section className="section">

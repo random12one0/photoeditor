@@ -27,10 +27,13 @@ jobs:
       - name: Install Chromium for the browser-driven tests
         run: npx playwright install --with-deps chromium
 
-      # The assignment solver against brute force. It runs in the browser like
-      # everything else, because that's how the TypeScript source gets loaded.
+      # Both run in the browser like everything else, because that's how the
+      # TypeScript source gets loaded. Neither needs photo fixtures.
       - name: Assignment solver
         run: npm run test:assign
+
+      - name: Import read-ahead
+        run: npm run test:readahead
 
       # End-to-end drives the real UI and inspects the ZIP that comes out.
       - name: End-to-end

@@ -18,7 +18,7 @@ export interface DecodedProxy {
  * Decode a file, honouring EXIF orientation, and downscale it to a proxy.
  * Returns the original pixel dimensions alongside the proxy bitmap.
  */
-export async function decodeToProxy(file: File): Promise<DecodedProxy> {
+export async function decodeToProxy(file: Blob): Promise<DecodedProxy> {
   const full = await createImageBitmap(file, { imageOrientation: 'from-image' })
   const { width, height } = full
   const scale = Math.min(1, PROXY_MAX_EDGE / Math.max(width, height))

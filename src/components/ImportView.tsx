@@ -21,6 +21,14 @@ const STEPS = [
   ['Export', 'Share straight to Instagram, or download the lot as a ZIP.'],
 ]
 
+/** Rounded hard, because a countdown that reads "3m 47s" invites watching it. */
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 45) return 'less than a minute'
+  const m = Math.round(s / 60)
+  return m <= 1 ? 'a minute' : `${m} minutes`
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(0)} MB`
@@ -83,6 +91,13 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
   const pct = progress && progress.total ? (progress.done / progress.total) * 100 : 0
   const storagePct = storage ? (storage.used / storage.quota) * 100 : 0
 
+  /* Only once there's a real rate to extrapolate from — an estimate that swings
+     wildly for the first few photos is worse than none. */
+  const left = progress ? progress.total - progress.done : 0
+  const remaining =
+    progress?.msPerPhoto && left > 0 ? formatDuration(progress.msPerPhoto * left) : null
+  const slow = (progress?.msPerPhoto ?? 0) > 1500
+
   return (
     <main className="content" data-view="import">
       <div className="wrap">
@@ -124,6 +139,15 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
                 <div className="bar-fill" style={{ width: `${pct}%` }} />
               </div>
               <div className="ingest-file">{progress.current || 'Finishing up'}</div>
+              {remaining && <div className="tiny dim">about {remaining} left</div>}
+              {/* A hundred photos off iCloud is a genuinely long wait, and a
+                  progress bar with no explanation reads as a hang. */}
+              {slow && (
+                <p className="tiny dim ingest-note">
+                  Photos kept in iCloud rather than on the phone have to download
+                  first, which is most of this wait. Keep this tab open.
+                </p>
+              )}
             </div>
           ) : (
             <>
