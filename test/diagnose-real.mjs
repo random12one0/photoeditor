@@ -9,9 +9,7 @@
  * Run:  node test/diagnose-real.mjs
  */
 
-import { chromium } from 'playwright'
-import { spawn } from 'node:child_process'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { launchBrowser, startServer } from './lib/harness.mjs'
 import { readdirSync } from 'node:fs'
 
 const PORT = 4325
@@ -31,19 +29,8 @@ const fmt = (s, d = 3) =>
 
 async function main() {
   const names = readdirSync(PHOTO_DIR).filter((f) => /\.jpe?g$/i.test(f)).sort()
-  const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
-    stdio: 'ignore',
-  })
-  for (let i = 0; i < 60; i++) {
-    try {
-      if ((await fetch(BASE)).ok) break
-    } catch {
-      /* wait */
-    }
-    await sleep(250)
-  }
-
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+  const { proc: server } = await startServer(PORT, { mode: 'dev' })
+  const browser = await launchBrowser()
   const page = await browser.newPage()
   page.on('pageerror', (e) => console.error('PAGE ERROR:', e.message))
   await page.goto(BASE)

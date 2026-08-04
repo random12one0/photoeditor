@@ -8,9 +8,7 @@
  * Run against a built preview server:  node test/e2e.mjs
  */
 
-import { chromium } from 'playwright'
-import { spawn } from 'node:child_process'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { launchBrowser, startServer } from './lib/harness.mjs'
 
 const PORT = 4319
 const BASE = `http://127.0.0.1:${PORT}`
@@ -193,32 +191,9 @@ async function injectSyntheticRoll(page, opts) {
 
 async function main() {
   console.log('Starting preview server…')
-  const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
-    stdio: 'ignore',
-    detached: false,
-  })
+  const { proc: server } = await startServer(PORT, { mode: 'preview' })
 
-  // Wait for the server to answer.
-  let up = false
-  for (let i = 0; i < 40; i++) {
-    try {
-      const res = await fetch(BASE)
-      if (res.ok) {
-        up = true
-        break
-      }
-    } catch {
-      /* not yet */
-    }
-    await sleep(250)
-  }
-  if (!up) {
-    console.error('Preview server never came up')
-    server.kill()
-    process.exit(1)
-  }
-
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+  const browser = await launchBrowser()
   const context = await browser.newContext({ acceptDownloads: true })
   const page = await context.newPage()
 

@@ -14,9 +14,7 @@
  * Run:  node test/real-photos.mjs
  */
 
-import { chromium } from 'playwright'
-import { spawn } from 'node:child_process'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { launchBrowser, startServer } from './lib/harness.mjs'
 import { readdirSync } from 'node:fs'
 
 const PORT = 4324
@@ -48,19 +46,8 @@ async function main() {
 
   // Dev server, not preview: this harness fetches fixtures from /test/, which
   // only the dev server serves.
-  const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
-    stdio: 'ignore',
-  })
-  for (let i = 0; i < 60; i++) {
-    try {
-      if ((await fetch(BASE)).ok) break
-    } catch {
-      /* wait */
-    }
-    await sleep(250)
-  }
-
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+  const { proc: server } = await startServer(PORT, { mode: 'dev' })
+  const browser = await launchBrowser()
   const context = await browser.newContext({ acceptDownloads: true })
   const page = await context.newPage()
   const pageErrors = []

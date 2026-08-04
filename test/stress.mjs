@@ -11,9 +11,7 @@
  * Run:  node test/stress.mjs
  */
 
-import { chromium } from 'playwright'
-import { spawn } from 'node:child_process'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { launchBrowser, startServer } from './lib/harness.mjs'
 
 const PORT = 4320
 const BASE = `http://127.0.0.1:${PORT}`
@@ -104,30 +102,9 @@ const SCENARIOS = [
 
 async function main() {
   console.log('Starting dev server…')
-  const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
-    stdio: 'ignore',
-  })
+  const { proc: server } = await startServer(PORT, { mode: 'dev' })
 
-  let up = false
-  for (let i = 0; i < 60; i++) {
-    try {
-      const r = await fetch(BASE)
-      if (r.ok) {
-        up = true
-        break
-      }
-    } catch {
-      /* keep waiting */
-    }
-    await sleep(250)
-  }
-  if (!up) {
-    console.error('dev server never came up')
-    server.kill()
-    process.exit(1)
-  }
-
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+  const browser = await launchBrowser()
   const page = await browser.newPage()
   page.on('pageerror', (e) => console.error('PAGE ERROR:', e.message))
   await page.goto(BASE)

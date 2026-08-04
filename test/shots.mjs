@@ -5,9 +5,7 @@
  * Run:  node test/shots.mjs   → writes into test/output/
  */
 
-import { chromium } from 'playwright'
-import { spawn } from 'node:child_process'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { launchBrowser, startServer } from './lib/harness.mjs'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
 const PORT = 4322
@@ -16,19 +14,8 @@ const OUT = new URL('./output/', import.meta.url).pathname
 
 async function main() {
   mkdirSync(OUT, { recursive: true })
-  const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
-    stdio: 'ignore',
-  })
-  for (let i = 0; i < 60; i++) {
-    try {
-      if ((await fetch(BASE)).ok) break
-    } catch {
-      /* wait */
-    }
-    await sleep(250)
-  }
-
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+  const { proc: server } = await startServer(PORT, { mode: 'dev' })
+  const browser = await launchBrowser()
 
   /* ---------------------------------------------------- desktop walkthrough */
   const page = await browser.newPage({ viewport: { width: 1400, height: 950 } })
