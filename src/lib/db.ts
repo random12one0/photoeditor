@@ -16,10 +16,29 @@ const STORE_META = 'meta'
 /** Everything about a Photo except the things we can rebuild or re-derive. */
 type StoredPhoto = Omit<Photo, 'file' | 'proxyUrl'>
 
+/**
+ * Bump whenever anything *derived* from a photo changes — a new descriptor, a
+ * different weighting, a new field on a pair.
+ *
+ * This is the fix for the most confusing bug in this project's history. A saved
+ * session stores the fingerprints computed at import, so after an upgrade the
+ * app was running new code over old numbers: photos with no colour or edge
+ * histogram fell back to the superseded weighting, and pairs saved before
+ * runners-up existed had none, so "not a pair" still just deleted the
+ * suggestion. Both reported symptoms, exactly — and neither reproducible from a
+ * fresh import, which is the only way it was ever tested.
+ *
+ * A version means the app can tell that what it loaded predates what it knows,
+ * and rebuild rather than quietly behave like the old version.
+ */
+export const SCHEMA_VERSION = 3
+
 interface StoredSession {
   photos: StoredPhoto[]
   groups: Group[]
   savedAt: number
+  /** Absent on anything saved before versioning existed. */
+  schema?: number
 }
 
 function open(): Promise<IDBDatabase> {
@@ -56,7 +75,10 @@ export async function saveSession(photos: Photo[], groups: Group[]): Promise<voi
       ({ file: _file, proxyUrl: _proxyUrl, ...rest }) => rest,
     )
     await tx(db, STORE_META, 'readwrite', (s) =>
-      s.put({ photos: stored, groups, savedAt: Date.now() } satisfies StoredSession, 'session'),
+      s.put(
+        { photos: stored, groups, savedAt: Date.now(), schema: SCHEMA_VERSION } satisfies StoredSession,
+        'session',
+      ),
     )
 
     // Files are written separately so re-saving metadata (which happens on every
@@ -88,6 +110,8 @@ export async function loadSession(): Promise<{
   groups: Group[]
   files: Map<string, File>
   savedAt: number
+  /** True when this session was saved by an older build of the app. */
+  stale: boolean
 } | null> {
   const db = await open()
   try {
@@ -112,7 +136,13 @@ export async function loadSession(): Promise<{
       }))
       .filter((g) => g.photoIds.length > 0)
 
-    return { photos: usable, groups, files, savedAt: session.savedAt }
+    return {
+      photos: usable,
+      groups,
+      files,
+      savedAt: session.savedAt,
+      stale: (session.schema ?? 0) < SCHEMA_VERSION,
+    }
   } catch {
     return null
   } finally {

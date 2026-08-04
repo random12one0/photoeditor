@@ -42,6 +42,12 @@ jobs:
       - name: End-to-end
         run: npm test
 
+      # Reopening a session written by an older build. Uses no photo fixtures
+      # of its own beyond the ones the e2e suite generates, and is the only
+      # suite that starts from saved state rather than a fresh import.
+      - name: Stale session upgrade
+        run: npm run test:stale
+
       # Grouping and pairing precision/recall across eight adversarial scenarios.
       # The real-photo suite is not run here: its fixtures are photographs of
       # real cars with visible plates and are deliberately not in the repo.

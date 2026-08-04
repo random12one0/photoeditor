@@ -11,7 +11,9 @@
  * roll.
  */
 
-const CACHE = 'unbklok-v1'
+/* Bumped whenever the shell changes shape. The activate handler deletes every
+   cache that isn't this one, so a bump is also the eviction. */
+const CACHE = 'unbklok-v2'
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg']
 
 self.addEventListener('install', (event) => {
@@ -35,6 +37,11 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+
+  /* The service worker script and the manifest are never served from cache:
+     they are how a new version announces itself, and a cached copy of them is a
+     version that can never update. */
+  if (url.pathname.endsWith('/sw.js') || url.pathname.endsWith('.webmanifest')) return
 
   // Navigations fall back to the cached shell so a reload works offline.
   if (request.mode === 'navigate') {

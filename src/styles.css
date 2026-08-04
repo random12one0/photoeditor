@@ -1718,3 +1718,22 @@ input[type='range']::-moz-range-thumb {
   font-weight: 600;
   color: var(--text);
 }
+
+/* Build identifier. Small and grey — it is for reporting a problem, not for
+   reading every day — but never hidden, because a version you have to go
+   looking for is a version nobody can tell you. */
+.build-id {
+  font-size: 0.6rem;
+  letter-spacing: 0;
+  font-weight: 400;
+  align-self: center;
+  white-space: nowrap;
+}
+@media (max-width: 420px) {
+  .build-id {
+    /* Just the date and sha still fit; the clock is the part that can go. */
+    max-width: 84px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}

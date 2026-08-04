@@ -9,6 +9,7 @@ import StyleView from './components/StyleView'
 import { clearBitmapCache, dropFromCache } from './lib/bitmapCache'
 import { releaseScratch } from './lib/canvasPool'
 import { DEFAULT_CLUSTER_SETTINGS, buildGroups, findPairs } from './lib/cluster'
+import { refingerprint } from './lib/ingest'
 import {
   clearSession,
   loadClusterSettings,
@@ -123,18 +124,46 @@ export default function App() {
           if (!file) continue
           const { bitmap } = await decodeToProxy(file)
           const proxyUrl = await bitmapToObjectUrl(bitmap)
+
+          /* Re-derive everything computed from the pixels rather than trusting
+             what was saved. The photo is already decoded here to rebuild its
+             preview, so this costs almost nothing — and the alternative is
+             running new matching code over fingerprints produced by an older
+             build, which is precisely the bug this exists to prevent. */
+          const fresh = saved.stale ? refingerprint(bitmap) : null
           bitmap.close()
-          /* A session saved before shot quality existed has no score. Neutral
-             rather than zero, so an old session doesn't rank every photo last. */
-          restored.push({ ...meta, quality: meta.quality ?? 0.5, file, proxyUrl })
+          restored.push({
+            ...meta,
+            ...(fresh ?? {}),
+            /* A session saved before shot quality existed has no score. Neutral
+               rather than zero, so an old session doesn't rank every photo last. */
+            quality: fresh?.quality ?? meta.quality ?? 0.5,
+            file,
+            proxyUrl,
+          })
         }
         if (cancelled) return
 
         setPhotos(restored)
-        setGroups(saved.groups)
-        if (restored.length) {
+
+        /* Suggestions made by an older build carry its mistakes, and its pairs
+           are missing whatever later versions added — runners-up, for one, so
+           "not a pair" would still just delete rather than offering the next
+           candidate. Rebuilding them is the only honest option, and it is
+           undoable. */
+        if (saved.stale && restored.length) {
+          setGroups(buildGroups(restored, DEFAULT_CLUSTER_SETTINGS))
           setStage('cars')
-          notify(`Picked up where you left off — ${restored.length} photos`)
+          notify(
+            `Matching has improved since this session was saved — ${restored.length} photos re-matched`,
+            true,
+          )
+        } else {
+          setGroups(saved.groups)
+          if (restored.length) {
+            setStage('cars')
+            notify(`Picked up where you left off — ${restored.length} photos`)
+          }
         }
       } finally {
         if (!cancelled) setRestoring(false)
@@ -457,9 +486,15 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="topbar-row">
-          <div className="brand">
+          {/* The build, on screen. A stale cached build and a genuinely broken
+              feature look identical from the outside; this is the difference
+              between diagnosing that and guessing at it. */}
+          <div className="brand" title={`Build ${__BUILD_ID__}`}>
             <span className="brand-dot" />
             unbklok
+            <span className="build-id mono dim" data-testid="build-id">
+              {__BUILD_ID__}
+            </span>
           </div>
           <div className="counts">
             {photos.length > 0 && (

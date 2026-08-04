@@ -234,14 +234,53 @@ Interiors themselves turned out not to need special handling. Once the solver
 was fixed the console pair came out exact, and `npm run test:diagnose:interior`
 prints the whole score matrix per component if that stops being true.
 
+**Local feature matching was built, measured, and left out.** Asked for as
+"something that could recognize shapes or objects... not just colour, but
+pattern", which is exactly ORB: FAST corners, oriented BRIEF descriptors, and
+RANSAC geometric verification — "do forty-one specific points agree on one
+single camera movement". `src/lib/features.ts` implements it; `npm run
+test:diagnose:features` scores it.
+
+It does something no global descriptor can. On the Jeep set the true trunk pair
+agrees on 69 points and the true console pair on 29, where every impostor
+manages 7 or fewer — and the driver's seat, which has no partner at all, reaches
+a maximum of 5 against anything. That last number is a kind of evidence the
+global scores simply cannot produce.
+
+It still loses. On both sets of real photographs, every weighting that includes
+it does worse than what already ships:
+
+```
+candidate                    Jeep rows  ref rows  min margin
+global (shipping)                  4/4       5/5      +0.009
+features only                      3/4       3/5      -0.154
+features + global, even            4/4       4/5      -0.058
+global + features 15%              4/4       5/5      +0.008
+```
+
+The reason is visible in the inlier counts: features are superb on close-ups
+with hard structure and poor on whole-car exteriors, where the paint changes
+from dull to glossy and the background moves. Adding a scale pyramid tripled the
+counts on close-ups — the trunk went from 38 to 69 — and made the exteriors
+slightly worse, because impostors gained too.
+
+So it is kept, documented and measurable, but not wired into scoring. Nothing in
+`src/` imports it, so it isn't in the bundle. If a set of photographs turns up
+that the current approach gets wrong and this one gets right, the harness is
+already there to prove it.
+
 ## Measured accuracy
 
-Ten suites. `npm run test:assign`, `npm run test:readahead` and `npm run
+Eleven suites. `npm run test:assign`, `npm run test:readahead` and `npm run
 test:decode` check the assignment solver, the import read-ahead and the proxy
 decode directly; `npm run test:accuracy`
 scores eight synthetic workflows; `npm run test:real`, `npm run test:samecar`,
-`npm run test:takes`, `npm run test:handpair` and `npm run test:runnerup` run the
-whole pipeline over real photographs.
+`npm run test:takes`, `npm run test:handpair`, `npm run test:runnerup` and `npm
+run test:stale` run the whole pipeline over real photographs.
+
+`test:stale` earns its place: it is the only one that starts from a *saved*
+session rather than a fresh import, which is the one thing every other suite was
+structurally unable to check — and where a real bug lived undetected.
 
 Ground truth for the real-photo set — which frame shows what, which pairs with
 which — is written down once in `test/lib/samecar-truth.mjs` and imported by
@@ -402,6 +441,7 @@ npm run test:samecar     # the bug report: one car, one job, eight real photos
 npm run test:takes       # three shots of one angle — does the sharpest win?
 npm run test:handpair    # pairing the leftovers by hand
 npm run test:runnerup    # saying no falls through to the next-best candidate
+npm run test:stale       # reopening a session saved by an older build
 npm run test:readahead   # import read-ahead, with the file latency simulated
 npm run test:decode      # decoding straight to proxy size, and its timing
 npm run test:accuracy    # precision/recall across 8 adversarial scenarios
@@ -410,6 +450,7 @@ npm run test:diagnose:real  # …and on real photos. Run before touching a thres
 npm run test:diagnose:takes # same-take vs different-angle, on both photo sources
 npm run test:diagnose:interior # the whole before x after matrix, per component
 npm run test:diagnose:descriptors # scores candidate scoring functions on real photos
+npm run test:diagnose:features # ORB keypoint matching, scored against the above
 npm run test:measure     # re-measure reference collages, re-cut their panels
 npm run test:shots       # screenshots and a sample composite into test/output/
 ```
@@ -435,7 +476,8 @@ src/lib/render.ts      the composite renderer
 src/lib/exporter.ts    full-resolution rendering, ZIP and share-sheet packing
 src/lib/ingest.ts      read-ahead, decode, downscale, EXIF, fingerprint
 src/lib/canvasPool.ts  shared scratch canvases
-src/lib/db.ts          IndexedDB session persistence
+src/lib/features.ts    ORB keypoints + RANSAC — measured, not currently used
+src/lib/db.ts          IndexedDB session persistence, with a schema version
 src/lib/share.ts       Web Share API, clipboard, haptics
 ```
 

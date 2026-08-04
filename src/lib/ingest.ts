@@ -207,3 +207,44 @@ export async function ingestFiles(
   onProgress?.({ done: files.length, total: files.length, current: '' })
   return { photos, failures }
 }
+
+/**
+ * Recompute everything derived from a photo's pixels.
+ *
+ * Used when restoring a session saved by an older build: the stored
+ * fingerprints were produced by whatever the matcher looked like then, and
+ * running today's weighting over yesterday's numbers is worse than either.
+ * Takes an already-decoded proxy, because the restore path has one in hand.
+ */
+export function refingerprint(
+  bitmap: ImageBitmap,
+): Pick<
+  Photo,
+  | 'dhash'
+  | 'colorSig'
+  | 'chromaSig'
+  | 'lumaGrid'
+  | 'lumaGridCoarse'
+  | 'colorHist'
+  | 'edgeHist'
+  | 'luma'
+  | 'quality'
+> {
+  const hashGrid = extractGrid(bitmap, 9, 8)
+  const colorGrid = extractGrid(bitmap, 32, 32)
+  const structureGrid = extractGrid(bitmap, LUMA_GRID, LUMA_GRID)
+  const coarseGrid = extractGrid(bitmap, COARSE_GRID, COARSE_GRID)
+  const qualityGrid = extractGrid(bitmap, QUALITY_GRID, QUALITY_GRID, 'quality')
+
+  return {
+    dhash: dhashFromImageData(hashGrid),
+    colorSig: colorSignature(colorGrid),
+    chromaSig: chromaSignature(colorGrid),
+    lumaGrid: lumaGridFromImageData(structureGrid),
+    lumaGridCoarse: lumaGridFromImageData(coarseGrid),
+    colorHist: colorHistogram(qualityGrid),
+    edgeHist: edgeHistogram(qualityGrid),
+    luma: meanLuma(colorGrid),
+    quality: qualityFromImageData(qualityGrid),
+  }
+}

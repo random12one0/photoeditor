@@ -12,7 +12,7 @@
     "test:accuracy": "node test/stress.mjs",
     "test:diagnose": "node test/diagnose.mjs",
     "test:shots": "node test/shots.mjs",
-    "test:all": "node test/assign.test.mjs && node test/readahead.test.mjs && node test/decode.test.mjs && node test/e2e.mjs && node test/stress.mjs && node test/real-photos.mjs && node test/samecar.mjs && node test/takes.mjs && node test/handpair.mjs && node test/runnerup.mjs",
+    "test:all": "node test/assign.test.mjs && node test/readahead.test.mjs && node test/decode.test.mjs && node test/e2e.mjs && node test/stress.mjs && node test/real-photos.mjs && node test/samecar.mjs && node test/takes.mjs && node test/handpair.mjs && node test/runnerup.mjs && node test/stale-session.mjs",
     "test:real": "node test/real-photos.mjs",
     "test:diagnose:real": "node test/diagnose-real.mjs",
     "test:measure": "node test/measure.mjs",
@@ -26,7 +26,9 @@
     "test:diagnose:interior": "node test/diagnose-interior.mjs",
     "test:decode": "node test/decode.test.mjs",
     "test:runnerup": "node test/runnerup.mjs",
-    "test:diagnose:descriptors": "node test/diagnose-descriptors.mjs"
+    "test:diagnose:descriptors": "node test/diagnose-descriptors.mjs",
+    "test:stale": "node test/stale-session.mjs",
+    "test:diagnose:features": "node test/diagnose-features.mjs"
   },
   "dependencies": {
     "exifr": "^7.1.3",
