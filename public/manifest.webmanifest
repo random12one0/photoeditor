@@ -1,6 +1,6 @@
 {
-  "name": "Unbklok — Detail Photo Studio",
-  "short_name": "Unbklok",
+  "name": "Before & After — Detail Photos",
+  "short_name": "Before & After",
   "description": "Batch before/after photo editor for car detailing.",
   "start_url": "./",
   "scope": "./",

@@ -8,6 +8,12 @@
 
 import type { ClusterSettings, Group, Photo, SavedPreset, StylePreset } from '../types'
 
+/* Deliberately not renamed with the app.
+ *
+ * These keys are where someone's in-progress session actually lives. Changing
+ * them doesn't migrate anything — it orphans it, silently, and the app comes up
+ * empty as though a day's work had never happened. The name on the screen is
+ * cosmetic; this is not. */
 const DB_NAME = 'unbklok'
 const DB_VERSION = 1
 const STORE_FILES = 'files'

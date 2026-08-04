@@ -223,6 +223,13 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
           </div>
         )}
 
+        {/* The exact build, where it can be found but isn't in the way. The
+            header carries the version number for reading out; this is for when
+            that isn't specific enough. */}
+        <p className="tiny dim build-line mono" data-testid="build-line">
+          v{__APP_VERSION__} · built {__BUILD_ID__}
+        </p>
+
         <div className="steps-list">
           <h3 style={{ marginBottom: 4 }}>How it works</h3>
           <ol>

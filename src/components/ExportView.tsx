@@ -18,6 +18,7 @@ import {
   shareFiles,
   supportsImageShare,
 } from '../lib/share'
+import { FILE_PREFIX } from '../brand'
 import type { Group, Photo, StylePreset } from '../types'
 import Icon from './Icon'
 import PairPreview from './PairPreview'
@@ -111,7 +112,7 @@ export default function ExportView({ groups, photoMap, preset, notify }: Props) 
   const downloadAll = () =>
     withBusy(async () => {
       const blob = await exportZip(groups, photoMap, preset, options, setProgress)
-      const name = `unbklok-${stamp()}.zip`
+      const name = `${FILE_PREFIX}-${stamp()}.zip`
 
       /* Try the share sheet first where a plain download can't be trusted.
          Inside an embedded frame the browser blocks the download silently —

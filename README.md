@@ -1,4 +1,9 @@
-# unbklok
+# Before & After
+
+A tool for car detailers. (The repo and its storage keys still say `unbklok` —
+that was the name of an empty GitHub repository on day one and it stuck by
+accident. The app was renamed; the storage keys deliberately were not, because
+changing them would orphan any session already saved on a phone.)
 
 A batch before/after photo editor for car detailing. Drop in a day's camera
 roll: it sorts the photos into cars, proposes which shots are before/after

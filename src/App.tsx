@@ -6,6 +6,7 @@ import ImportView from './components/ImportView'
 import PairView from './components/PairView'
 import ShortcutSheet from './components/ShortcutSheet'
 import StyleView from './components/StyleView'
+import { APP_NAME } from './brand'
 import { clearBitmapCache, dropFromCache } from './lib/bitmapCache'
 import { releaseScratch } from './lib/canvasPool'
 import { DEFAULT_CLUSTER_SETTINGS, buildGroups, findPairs } from './lib/cluster'
@@ -467,7 +468,7 @@ export default function App() {
   if (restoring) {
     return (
       <div className="boot">
-        <div className="boot-mark">unbklok</div>
+        <div className="boot-mark">{APP_NAME}</div>
         <div className="spinner" />
         <div className="tiny dim">Looking for a saved session</div>
       </div>
@@ -486,14 +487,16 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="topbar-row">
-          {/* The build, on screen. A stale cached build and a genuinely broken
+          {/* The version, on screen. A stale cached build and a genuinely broken
               feature look identical from the outside; this is the difference
-              between diagnosing that and guessing at it. */}
+              between diagnosing that and guessing at it. The number is short
+              enough to read out; the date and commit sit under Import for when
+              that isn't specific enough. */}
           <div className="brand" title={`Build ${__BUILD_ID__}`}>
             <span className="brand-dot" />
-            unbklok
+            {APP_NAME}
             <span className="build-id mono dim" data-testid="build-id">
-              {__BUILD_ID__}
+              v{__APP_VERSION__}
             </span>
           </div>
           <div className="counts">

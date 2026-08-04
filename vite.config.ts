@@ -1,6 +1,9 @@
 import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
 
 /**
  * A build identifier the app can show on screen.
@@ -8,8 +11,12 @@ import react from '@vitejs/plugin-react'
  * This exists because of a question that could not be answered from a
  * description: "I don't see much change between when we first started and now."
  * A stale cached build and a genuinely broken feature look identical from the
- * outside, and guessing between them wasted a round. Now the version is on the
- * screen and can be read back.
+ * outside, and guessing between them wasted a round.
+ *
+ * Two identifiers, because they answer different questions. The version number
+ * from package.json is the one to read out loud — short, ordered, and obviously
+ * newer or older than another. The date and commit below it are for pinning
+ * down exactly which code is running when that matters.
  */
 function buildId(): string {
   let sha = 'nogit'
@@ -29,6 +36,7 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
     __BUILD_ID__: JSON.stringify(buildId()),
   },
   build: {

@@ -13,7 +13,7 @@
 
 /* Bumped whenever the shell changes shape. The activate handler deletes every
    cache that isn't this one, so a bump is also the eviction. */
-const CACHE = 'unbklok-v2'
+const CACHE = 'ba-v3'
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg']
 
 self.addEventListener('install', (event) => {

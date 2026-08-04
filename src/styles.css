@@ -1729,11 +1729,12 @@ input[type='range']::-moz-range-thumb {
   align-self: center;
   white-space: nowrap;
 }
-@media (max-width: 420px) {
-  .build-id {
-    /* Just the date and sha still fit; the clock is the part that can go. */
-    max-width: 84px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+
+
+/* Exact build, on the first screen. Quiet, but findable without being told
+   where to look. */
+.build-line {
+  text-align: center;
+  margin: var(--s3) 0 0;
+  font-size: 0.66rem;
 }
