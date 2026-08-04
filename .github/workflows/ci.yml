@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Chromium for the browser-driven tests
+        run: npx playwright install --with-deps chromium
+
+      # End-to-end drives the real UI and inspects the ZIP that comes out.
+      - name: End-to-end
+        run: npm test
+
+      # Grouping and pairing precision/recall across eight adversarial scenarios.
+      # The real-photo suite is not run here: its fixtures are photographs of
+      # real cars with visible plates and are deliberately not in the repo.
+      - name: Accuracy
+        run: npm run test:accuracy
