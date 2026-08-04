@@ -28,9 +28,11 @@ export function launchBrowser(options = {}) {
  * harnesses that fetch fixtures out of /test/ need.
  */
 export async function startServer(port, { mode = 'dev', timeoutMs = 120_000 } = {}) {
-  const args = mode === 'preview'
-    ? ['vite', 'preview', '--port', String(port), '--strictPort']
-    : ['vite', '--port', String(port), '--strictPort']
+  /* --host 127.0.0.1 is not optional. Vite binds "localhost", which on a
+     GitHub runner resolves to ::1 while the harness polls 127.0.0.1 — the
+     server comes up perfectly and the poll never sees it. */
+  const common = ['--port', String(port), '--strictPort', '--host', '127.0.0.1']
+  const args = mode === 'preview' ? ['vite', 'preview', ...common] : ['vite', ...common]
 
   const proc = spawn('npx', args, { stdio: 'ignore' })
 
