@@ -76,7 +76,7 @@ export default function PairByHand({ photos, onPair }: Props) {
   const zoomed = zoom ? photos.find((p) => p.id === zoom) : null
 
   return (
-    <section className="section" data-testid="pair-by-hand">
+    <section className="section" id="pair-by-hand" data-testid="pair-by-hand">
       <div className="section-head">
         <h3>Pair the rest</h3>
         <span className="pill">{photos.length}</span>

@@ -49,6 +49,27 @@ export function blobToFile(blob: Blob, name: string): File {
   return new File([blob], name, { type: blob.type || 'image/jpeg' })
 }
 
+/**
+ * True when the app is running inside someone else's page rather than at its
+ * own address.
+ *
+ * This matters for one reason: a sandboxed iframe blocks downloads unless the
+ * embedding page opted in, and the block is silent. Clicking Download does
+ * nothing at all — no error, no file, nothing to report — which is exactly how
+ * it was described from a phone. Sharing and copying still work, because those
+ * go through the OS rather than through a navigation.
+ *
+ * Detected by the frame check throwing or disagreeing; a cross-origin parent
+ * makes `window.top` unreadable, which is itself the answer.
+ */
+export function isEmbedded(): boolean {
+  try {
+    return window.self !== window.top
+  } catch {
+    return true
+  }
+}
+
 /** Copy an image to the clipboard, where the platform allows it. */
 export async function copyImage(blob: Blob): Promise<boolean> {
   try {

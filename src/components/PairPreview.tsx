@@ -43,8 +43,45 @@ async function getLogo(dataUrl: string | null): Promise<ImageBitmap | null> {
 export default function PairPreview({ before, after, preset, maxWidth, fill }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [pending, setPending] = useState(true)
+  const [failure, setFailure] = useState<string | null>(null)
+  const [visible, setVisible] = useState(false)
+
+  /**
+   * Only render once the preview is actually on screen.
+   *
+   * The export screen shows one of these per pair, and rendering all of them at
+   * once meant a dozen canvases and two dozen decoded photos allocated in the
+   * same frame — which is how a phone runs out of canvas memory and starts
+   * handing back blank ones. Rendering on sight also means scrolling to a car
+   * costs one preview rather than the whole page costing all of them.
+   */
+  useEffect(() => {
+    /* The canvas, not its wrapper. The wrapper is `display: contents` so it
+       doesn't disturb the export grid's layout — which also means it generates
+       no box, and an element with no box never intersects anything. Observing
+       it meant every preview stayed invisible for ever. */
+    const el = canvasRef.current
+    if (!el) return
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true)
+          io.disconnect()
+        }
+      },
+      // A screen's worth of warning, so it is painted before it is scrolled to.
+      { rootMargin: '600px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
 
   useEffect(() => {
+    if (!visible) return
     let cancelled = false
 
     // Debounce so dragging a slider doesn't queue a render per pixel.
@@ -73,9 +110,17 @@ export default function PairPreview({ before, after, preset, maxWidth, fill }: P
           }
 
           renderComposite(canvas, { before: beforeBmp, after: afterBmp, logo }, preset)
+          setFailure(null)
           setPending(false)
-        } catch {
-          if (!cancelled) setPending(false)
+        } catch (err) {
+          /* This used to be swallowed, which is why a preview that failed was
+             indistinguishable from one still loading: both were a grey
+             rectangle, for ever, with nothing to report. A visible reason is
+             worth far more than a tidy catch block — especially for a failure
+             that only happens on someone else's phone. */
+          if (cancelled) return
+          setFailure(err instanceof Error ? err.message : 'could not be drawn')
+          setPending(false)
         }
       })()
     }, 60)
@@ -84,13 +129,22 @@ export default function PairPreview({ before, after, preset, maxWidth, fill }: P
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [before, after, preset, maxWidth, fill])
+  }, [before, after, preset, maxWidth, fill, visible])
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={`preview-canvas${pending ? ' loading' : ''}`}
-      aria-label="Preview of the finished image"
-    />
+    <div className="preview-holder">
+      <canvas
+        ref={canvasRef}
+        className={`preview-canvas${pending ? ' loading' : ''}`}
+        aria-label="Preview of the finished image"
+        data-testid="preview-canvas"
+        hidden={Boolean(failure)}
+      />
+      {failure && (
+        <p className="tiny preview-failed" role="status" data-testid="preview-failed">
+          Preview didn’t render — {failure}
+        </p>
+      )}
+    </div>
   )
 }

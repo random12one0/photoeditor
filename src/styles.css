@@ -1664,3 +1664,57 @@ input[type='range']::-moz-range-thumb {
   justify-content: center;
   margin-top: 10px;
 }
+
+/* The preview and, when it fails, the reason why. A grey rectangle that never
+   resolves is indistinguishable from one still loading, and neither can be
+   reported by the person looking at it. */
+.preview-holder {
+  display: contents;
+}
+.preview-failed {
+  display: grid;
+  place-content: center;
+  text-align: center;
+  padding: var(--s4);
+  min-height: 80px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--no);
+  text-wrap: pretty;
+}
+
+/* Leftovers live below the review card, which on a phone is a screen and a half
+   away. This is the signpost, at the top where the eye already is. */
+.leftover-jump {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  width: 100%;
+  min-height: var(--tap);
+  margin-bottom: var(--s3);
+  padding: 0 var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.leftover-jump:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.leftover-jump strong {
+  color: var(--text);
+}
+.leftover-jump-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-weight: 600;
+  color: var(--text);
+}

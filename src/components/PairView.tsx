@@ -432,6 +432,31 @@ export default function PairView({
             })}
           </div>
 
+          {/* The panel for these lives below a full-height review card, which on
+              a phone means it is a screen and a half down and was reported as
+              never having been seen at all. A count at the top, where the eye
+              already is, and a tap to get there. */}
+          {unpaired.length > 0 && (
+            <button
+              className="leftover-jump"
+              data-testid="leftover-jump"
+              onClick={() =>
+                document
+                  .getElementById('pair-by-hand')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+            >
+              <span>
+                <strong>{unpaired.length}</strong> photo
+                {unpaired.length === 1 ? '' : 's'} not paired up
+              </span>
+              <span className="leftover-jump-cta">
+                Pair by hand
+                <Icon name="chevronRight" size={15} />
+              </span>
+            </button>
+          )}
+
           {current && before && after ? (
             <div
               className="review"

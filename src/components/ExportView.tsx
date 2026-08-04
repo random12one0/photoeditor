@@ -10,7 +10,14 @@ import {
   type ExportOptions,
   type ExportProgress,
 } from '../lib/exporter'
-import { copyImage, haptic, shareFiles, supportsImageShare } from '../lib/share'
+import {
+  canShareFiles,
+  copyImage,
+  haptic,
+  isEmbedded,
+  shareFiles,
+  supportsImageShare,
+} from '../lib/share'
 import type { Group, Photo, StylePreset } from '../types'
 import Icon from './Icon'
 import PairPreview from './PairPreview'
@@ -35,8 +42,12 @@ export default function ExportView({ groups, photoMap, preset, notify }: Props) 
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<ExportProgress | null>(null)
   const [canShare, setCanShare] = useState(false)
+  const [embedded, setEmbedded] = useState(false)
 
-  useEffect(() => setCanShare(supportsImageShare()), [])
+  useEffect(() => {
+    setCanShare(supportsImageShare())
+    setEmbedded(isEmbedded())
+  }, [])
 
   const options: ExportOptions = useMemo(
     () => ({ includeSingles, confirmedOnly, groupIds: [...selected] }),
@@ -100,8 +111,29 @@ export default function ExportView({ groups, photoMap, preset, notify }: Props) 
   const downloadAll = () =>
     withBusy(async () => {
       const blob = await exportZip(groups, photoMap, preset, options, setProgress)
-      downloadBlob(blob, `unbklok-${stamp()}.zip`)
-      notify('ZIP downloaded')
+      const name = `unbklok-${stamp()}.zip`
+
+      /* Try the share sheet first where a plain download can't be trusted.
+         Inside an embedded frame the browser blocks the download silently —
+         nothing happens, nothing is reported — and on a phone the share sheet
+         is the better destination anyway: it can put the file in Files, in a
+         message, or straight into another app. */
+      const zipFile = new File([blob], name, { type: 'application/zip' })
+      if (isEmbedded() && canShareFiles([zipFile])) {
+        const outcome = await shareFiles([zipFile], 'Before & after')
+        if (outcome === 'shared') {
+          notify('ZIP shared')
+          return
+        }
+        if (outcome === 'cancelled') return
+      }
+
+      downloadBlob(blob, name)
+      notify(
+        isEmbedded()
+          ? 'ZIP built — if nothing saved, downloads are blocked in this embedded view'
+          : 'ZIP downloaded',
+      )
     })
 
   const shareOne = (group: Group, index: number) =>
@@ -138,6 +170,21 @@ export default function ExportView({ groups, photoMap, preset, notify }: Props) 
     <>
       <main className="content has-actionbar" data-view="export">
         <div className="wrap">
+          {/* Downloads are blocked inside an embedded frame, and blocked
+              silently — the click does nothing and reports nothing. Better to
+              say so up front than to let it look like the export is broken. */}
+          {embedded && (
+            <div className="notice" data-testid="embedded-notice">
+              <Icon name="sparkle" size={16} />
+              <div>
+                <strong>Downloads may not work here.</strong> This page is running
+                inside another page, and browsers block file downloads from an
+                embedded frame. <strong>Share</strong> and <strong>Copy</strong>{' '}
+                still work. For ZIPs, open the app at its own web address.
+              </div>
+            </div>
+          )}
+
           <div className="export-hero">
             <div>
               <div className="export-count mono">{compositeCount}</div>
