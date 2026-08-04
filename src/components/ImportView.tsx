@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ingestFiles, type IngestProgress } from '../lib/ingest'
 import type { Photo } from '../types'
 import Icon from './Icon'
@@ -21,8 +21,15 @@ const STEPS = [
   ['Export', 'Share straight to Instagram, or download the lot as a ZIP.'],
 ]
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(0)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
 export default function ImportView({ existingCount, onImported, onReset, notify }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [storage, setStorage] = useState<{ used: number; quota: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<IngestProgress | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -58,7 +65,23 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
     [onImported, notify],
   )
 
+  /* A session of full-resolution photos is hundreds of megabytes, and the
+     browser will start refusing writes at its quota with no warning of its own.
+     Showing the number means a failed save is explicable rather than mysterious. */
+  useEffect(() => {
+    let cancelled = false
+    void navigator.storage?.estimate?.().then((e) => {
+      if (!cancelled && e.usage != null && e.quota != null) {
+        setStorage({ used: e.usage, quota: e.quota })
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [existingCount, busy])
+
   const pct = progress && progress.total ? (progress.done / progress.total) * 100 : 0
+  const storagePct = storage ? (storage.used / storage.quota) * 100 : 0
 
   return (
     <main className="content" data-view="import">
@@ -133,6 +156,24 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
             <p className="tiny muted">
               {existingCount} photos already loaded. Anything you add joins them.
             </p>
+            {storage && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div className="bar">
+                  <div
+                    className="bar-fill"
+                    style={{
+                      width: `${Math.min(100, storagePct)}%`,
+                      background: storagePct > 80 ? 'var(--no)' : undefined,
+                    }}
+                  />
+                </div>
+                <p className="tiny dim">
+                  {formatBytes(storage.used)} of {formatBytes(storage.quota)} used on this
+                  device
+                  {storagePct > 80 && ' — nearly full, clear this session when you\'re done'}
+                </p>
+              </div>
+            )}
             <button
               className="btn danger"
               onClick={() => {
