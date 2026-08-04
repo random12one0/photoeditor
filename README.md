@@ -193,8 +193,11 @@ npm run dev              # dev server
 npm run build            # production build to dist/
 npm run typecheck
 
+npm run test:all         # every suite below, in order
 npm test                 # end-to-end: import → group → pair → style → export → reload
+npm run test:assign      # the assignment solver against brute force
 npm run test:real        # the whole pipeline over real detailing photos
+npm run test:samecar     # the bug report: one car, one job, eight real photos
 npm run test:accuracy    # precision/recall across 8 adversarial scenarios
 npm run test:diagnose    # distance distributions on synthetic fixtures
 npm run test:diagnose:real  # …and on real photos. Run before touching a threshold.
@@ -207,15 +210,18 @@ that comes out — file count, folder layout, and the pixel dimensions of the
 JPEGs inside. They target `data-view` / `data-testid` hooks rather than CSS
 classes, so restyling can't break them.
 
-`test/fixtures/reference/` and `test/fixtures/photos/` are deliberately
-gitignored: they're real photographs of real cars, license plates included, and
-they don't belong in a public repository.
+`test/fixtures/reference/`, `test/fixtures/photos/` and `test/fixtures/samecar/`
+are deliberately gitignored: they're real photographs of real cars, license
+plates included, and they don't belong in a public repository. The suites that
+need them skip when they're absent, which is why CI runs the synthetic ones
+only.
 
 ### Layout
 
 ```
 src/lib/hash.ts        fingerprinting — luma grids, chromaticity, dHash, shifted NCC
-src/lib/cluster.ts     burst detection, car grouping, pair suggestion
+src/lib/cluster.ts     car grouping on the clock, pair suggestion
+src/lib/assign.ts      optimal one-to-one assignment (Hungarian)
 src/lib/render.ts      the composite renderer
 src/lib/exporter.ts    full-resolution rendering, ZIP and share-sheet packing
 src/lib/ingest.ts      decode, downscale, EXIF, fingerprint
