@@ -24,6 +24,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Pure unit test, no browser: the assignment solver against brute force.
+      - name: Assignment solver
+        run: npm run test:assign
+
       - name: Install Chromium for the browser-driven tests
         run: npx playwright install --with-deps chromium
 

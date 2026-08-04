@@ -138,49 +138,77 @@ export default function GroupsView({
                   Re-grouping rebuilds every car from scratch and discards manual
                   moves and confirmed pairs. It can be undone.
                 </p>
+
                 <label className="field">
                   <span className="field-label">
-                    New car after a gap of <b>{formatGap(draft.carGapMinutes)}</b>
+                    Start a new car after a break of{' '}
+                    <b>{formatGap(draft.newCarGapMinutes)}</b>
                   </span>
                   <input
                     type="range"
-                    min={20}
-                    max={480}
-                    step={10}
-                    value={draft.carGapMinutes}
+                    min={15}
+                    max={360}
+                    step={15}
+                    value={draft.newCarGapMinutes}
                     onChange={(e) =>
-                      setDraft({ ...draft, carGapMinutes: Number(e.target.value) })
+                      setDraft({ ...draft, newCarGapMinutes: Number(e.target.value) })
                     }
                   />
                   <span className="tiny dim">
-                    Longer than a detail takes, shorter than the gap to the next car.
+                    Longer than you leave a car mid-job, shorter than the gap before the
+                    next one.
                   </span>
                 </label>
+
                 <label className="field">
                   <span className="field-label">
-                    Separate before &amp; after at <b>{formatGap(draft.burstGapMinutes)}</b>
+                    One car never spans more than <b>{draft.maxCarSpanHours} hours</b>
                   </span>
                   <input
                     type="range"
-                    min={2}
-                    max={90}
-                    value={draft.burstGapMinutes}
+                    min={1}
+                    max={14}
+                    step={0.5}
+                    value={draft.maxCarSpanHours}
                     onChange={(e) =>
-                      setDraft({ ...draft, burstGapMinutes: Number(e.target.value) })
+                      setDraft({ ...draft, maxCarSpanHours: Number(e.target.value) })
                     }
                   />
                   <span className="tiny dim">
-                    The longest pause inside a car is the job itself.
+                    First photo to last photo of the same car.
                   </span>
                 </label>
+
                 <label className="field">
                   <span className="field-label">
-                    Trust walk-around order <b>{Math.round(draft.orderWeight * 100)}%</b>
+                    Only suggest a pair above{' '}
+                    <b>{Math.round(draft.minPairScore * 100)}% match</b>
+                  </span>
+                  <input
+                    type="range"
+                    min={0.3}
+                    max={0.9}
+                    step={0.01}
+                    value={draft.minPairScore}
+                    onChange={(e) =>
+                      setDraft({ ...draft, minPairScore: Number(e.target.value) })
+                    }
+                  />
+                  <span className="tiny dim">
+                    Raise it if you're being offered pairs that aren't the same shot.
+                    Anything below is left for you to pair by hand.
+                  </span>
+                </label>
+
+                <label className="field">
+                  <span className="field-label">
+                    Follow the order you shoot in{' '}
+                    <b>{Math.round(draft.orderWeight * 100)}%</b>
                   </span>
                   <input
                     type="range"
                     min={0}
-                    max={1}
+                    max={0.6}
                     step={0.05}
                     value={draft.orderWeight}
                     onChange={(e) =>
@@ -188,8 +216,8 @@ export default function GroupsView({
                     }
                   />
                   <span className="tiny dim">
-                    Raise it if you shoot the same angles in the same order every time;
-                    lower it to go on how the photos look instead.
+                    Only breaks ties. Raise it if you always circle a car the same way;
+                    leave it low if you don't.
                   </span>
                 </label>
                 <button className="btn" onClick={() => onRegroup(draft)}>

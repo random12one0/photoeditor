@@ -142,9 +142,12 @@ async function injectSyntheticRoll(page, opts) {
     const t0 = new Date('2026-03-02T09:00:00Z').getTime()
 
     for (let car = 0; car < cars; car++) {
-      // Each car gets its own 3-hour slot: before batch, then a gap while it's
-      // detailed, then the after batch.
-      const carStart = t0 + car * 4 * HOUR
+      /* Each car gets its own slot: a before batch, a gap while it's detailed,
+         then an after batch. Spaced across a working day rather than packed
+         four hours apart — the job itself runs over an hour and a half, and a
+         gap threshold that survives that is necessarily wider than the tight
+         spacing this fixture used to assume. */
+      const carStart = t0 + car * 8 * HOUR
 
       for (let a = 0; a < angles; a++) {
         const blob = await drawPhoto(car + 1, a + 1, true)

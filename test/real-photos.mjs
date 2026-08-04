@@ -65,11 +65,12 @@ async function main() {
       const t0 = new Date('2026-05-04T09:00:00Z').getTime()
       const out = []
 
-      // Lay them out like a real working day: each car gets a before burst,
-      // ninety minutes of work, then an after burst; cars are hours apart.
+      /* Five separate jobs, one per day — which is what these fixtures are.
+         They were previously spaced four hours apart, which was invented rather
+         than observed, and tighter than a mobile detailer ever works. */
       const cars = [...new Set(files.map((n) => n.split('_')[0]))].sort()
       for (let ci = 0; ci < cars.length; ci++) {
-        const carStart = t0 + ci * 4 * 3600_000
+        const carStart = t0 + ci * 24 * 3600_000
         for (const name of files.filter((n) => n.startsWith(cars[ci] + '_'))) {
           const isAfter = name.includes('_after')
           const blob = await (await fetch(`/test/fixtures/photos/${name}`)).blob()

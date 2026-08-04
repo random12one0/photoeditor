@@ -1,47 +1,58 @@
 import type { ClusterSettings, Group, Pair, Photo } from '../types'
-import { COARSE_GRID, carSimilarity, similarity } from './hash'
+import { assignMax } from './assign'
+import { COARSE_GRID, similarity } from './hash'
 
 /**
  * How photos get sorted into cars and paired up.
  *
- * This is the third design. The first two were built against drawn fixtures and
- * both fell over on real photographs; the measurements that killed them are in
- * test/diagnose-real.mjs and worth keeping in mind before changing anything
- * here.
+ * Two things this got wrong in practice, both reported from real use, and both
+ * worth stating because they were structural rather than tuning:
  *
- * What was assumed, and what turned out to be true:
+ * 1. One car came back as six. The old design assembled cars by pairing bursts
+ *    two at a time — it assumed a car was exactly "the before walk-around plus
+ *    the after walk-around". Real sessions are nothing like that tidy: photos
+ *    come in many bursts across a job, and a car shot in twelve bursts became
+ *    six cars. No threshold fixes that; the model was wrong.
  *
- *   Assumed: a before and an after of the same shot are the same framing, so
- *   cross-correlation identifies pairs almost perfectly.
+ * 2. Wheels were matched to centre consoles. Walk-around order was weighted at
+ *    45%, near-equal with what the photos actually looked like, so the third
+ *    before shot got married to the third after shot whatever either contained.
+ *    Assignment was also greedy, which compounds it: greedy takes the best
+ *    single pair first, and everything after that settles for what's left.
  *
- *   Actually: on real detailing photos, true pairs score between -0.10 and 0.43,
- *   while unrelated photos of different cars reach 0.27. The distributions
- *   overlap almost entirely. Nobody stands in exactly the same spot ninety
- *   minutes later, and the reshoot is often from a visibly different distance
- *   and angle.
+ * What replaced them is deliberately simpler and easier to reason about, which
+ * matters — the settings have to be comprehensible to be fixable:
  *
- * So visual similarity cannot decide anything on its own. What is reliable is
- * the clock, and the way people work:
+ *   Cars are cut on the clock. A new car starts after a long enough break, and
+ *   no car may span more than a set number of hours. Both are plain numbers a
+ *   person can picture, and they match how the day actually runs.
  *
- *   1. Photos come in bursts — a walk around the car, a few minutes long.
- *   2. A car is a before burst and an after burst, separated by the job.
- *   3. People walk around a car the same way twice, so the Nth before shot and
- *      the Nth after shot are usually the same angle.
- *
- * Hence: two-level time segmentation for grouping, and pairing that combines
- * that walk-around order with whatever the visual signal is worth. Crucially,
- * suggestions are RANKED by confidence, never gated by a threshold — a gate
- * tuned on real data would either admit everything or reject everything.
- * The user confirms each one at a tap, and the ordering is what saves them time.
+ *   Pairs are chosen by optimal assignment over the whole before/after set, so
+ *   the result is the best total matching rather than whatever a first pass
+ *   grabbed. Order is a light tiebreak. Anything below the quality floor is
+ *   left unpaired rather than married to the nearest leftover, because a wrong
+ *   pair costs more than a missing one.
  */
 
 export const DEFAULT_CLUSTER_SETTINGS: ClusterSettings = {
-  /** A burst is one walk around the car. */
-  burstGapMinutes: 20,
-  /** Absolute ceiling on how far apart one car's two bursts can be. */
-  carGapMinutes: 480,
-  /** How much to trust walk-around order versus how the photos look. */
-  orderWeight: 0.45,
+  /* Longer than a car sits mid-job. A detail leaves the car alone for two or
+     three hours, so anything shorter than that splits one car in half — which
+     is exactly what was happening. */
+  newCarGapMinutes: 240,
+  /** No car spans longer than this end to end. */
+  maxCarSpanHours: 6,
+  /* Off by default.
+   *
+   * The idea was sound — people circle a car the same way twice — but it
+   * assumes the two batches line up, and on real sessions they don't: three
+   * before shots against five after shots makes index 1 the console rather than
+   * the wheel. Measured on a real car, even a 15% weight was enough to pull the
+   * wheel away from the wheel and onto the centre console, which is exactly the
+   * failure that was reported. Content decides; this is available to turn up for
+   * anyone who really does shoot a fixed sequence. */
+  orderWeight: 0,
+  /** Below this match, no pair is suggested at all. */
+  minPairScore: 0.5,
 }
 
 let groupCounter = 0
@@ -49,186 +60,61 @@ let pairCounter = 0
 const nextGroupId = () => `g${Date.now().toString(36)}_${(groupCounter++).toString(36)}`
 const nextPairId = () => `pair${Date.now().toString(36)}_${(pairCounter++).toString(36)}`
 
-/** Split a time-ordered list wherever the gap exceeds `gapMs`. */
-function segmentByGap(photos: Photo[], gapMs: number): Photo[][] {
-  if (photos.length === 0) return []
-  const out: Photo[][] = [[photos[0]]]
-  for (let i = 1; i < photos.length; i++) {
-    if (photos[i].takenAt - photos[i - 1].takenAt > gapMs) out.push([photos[i]])
-    else out[out.length - 1].push(photos[i])
-  }
-  return out
-}
-
 /**
- * Where one walk-around ends and the next begins.
+ * Cut a day's photos into cars.
  *
- * A fixed threshold breaks in both directions. Set it at twenty minutes and a
- * shop with a nineteen-minute turnaround has one car's after shots welded to
- * the next car's before shots — no amount of clever grouping downstream can
- * recover from bursts that are already wrong. Set it low and a photographer who
- * pauses to move a bin splits one walk-around in two.
+ * On the clock, and only on the clock — which is a deliberate retreat, so it's
+ * worth recording why.
  *
- * The gaps inside a burst are seconds to a couple of minutes, and every gap
- * that matters is far larger, so the roll's own median gap sets the scale.
- * Eight times that separates the two populations comfortably, and the user's
- * setting stays on as a ceiling.
+ * Vision was tried here twice. The second attempt compared the photos either
+ * side of every long pause, on the theory that a car looks like itself and a
+ * boundary between two cars would show up as a drop. Measured against real
+ * photographs it does not. Scoring each boundary against the run it sits in:
+ *
+ *   one car, boundaries that must NOT be cut   0.94, 0.98, 1.12, 1.12, 1.17
+ *   five cars, boundaries that MUST be cut     0.94, 1.01, 1.03, 1.08
+ *
+ * The distributions sit on top of each other, and three of the four genuine
+ * car boundaries look *more* alike across the boundary than the photos within a
+ * car do. There is no threshold in there. Two different cars photographed in
+ * the same driveway under the same sky simply are not distinguishable this way,
+ * and pretending otherwise produced worse results than doing nothing.
+ *
+ * So: two rules a person can picture and correct.
+ *
+ *   A break longer than `newCarGapMinutes` starts a new car.
+ *   No car spans more than `maxCarSpanHours` end to end.
+ *
+ * The honest limitation, which the settings text says out loud: two cars
+ * finished and started within the gap will land together, and want one tap on
+ * Split. That is the right way round — a merged car is one tap to fix, whereas
+ * a car shattered into six was the complaint that started this.
  */
-function burstThreshold(photos: Photo[], settings: ClusterSettings): number {
-  const ceiling = settings.burstGapMinutes * 60_000
-  if (photos.length < 3) return ceiling
+function splitIntoCars(ordered: Photo[], settings: ClusterSettings): Photo[][] {
+  if (!ordered.length) return []
+  const gapMs = settings.newCarGapMinutes * 60_000
+  const spanMs = settings.maxCarSpanHours * 3_600_000
 
-  const gaps: number[] = []
-  for (let i = 1; i < photos.length; i++) {
-    gaps.push(photos[i].takenAt - photos[i - 1].takenAt)
+  const cars: Photo[][] = [[ordered[0]]]
+  for (let i = 1; i < ordered.length; i++) {
+    const current = cars[cars.length - 1]
+    const sinceLast = ordered[i].takenAt - current[current.length - 1].takenAt
+    const spanIfAdded = ordered[i].takenAt - current[0].takenAt
+
+    if (sinceLast > gapMs || spanIfAdded > spanMs) cars.push([ordered[i]])
+    else current.push(ordered[i])
   }
-  gaps.sort((a, b) => a - b)
-  const median = gaps[Math.floor(gaps.length / 2)]
-
-  // Floor of three minutes so a rapid-fire burst doesn't shatter on a pause of
-  // a few seconds.
-  return Math.min(ceiling, Math.max(180_000, median * 8))
-}
-
-/**
- * Affinity between two bursts: how much they look like the same car.
- *
- * The best few cross-burst matches, averaged. Taking the mean over everything
- * would drown the signal — most shots in a burst are of different angles and
- * shouldn't match anything — while taking only the single best match is noisy.
- */
-function burstAffinity(a: Photo[], b: Photo[]): number {
-  const scores: number[] = []
-  // carSimilarity, not similarity: this is the "same car?" question, and the
-  // two are weighted differently on purpose.
-  for (const pa of a) for (const pb of b) scores.push(carSimilarity(pa, pb))
-  if (!scores.length) return 0
-  scores.sort((x, y) => y - x)
-  const k = Math.max(1, Math.min(3, Math.floor(scores.length / 3)))
-  return scores.slice(0, k).reduce((x, y) => x + y, 0) / k
-}
-
-/**
- * Decide which bursts belong to the same car.
- *
- * Timestamps alone genuinely cannot answer this. Given bursts A B C D, whether
- * the cars are (A,B) and (C,D) or A and (B,C) and D depends on facts the clock
- * doesn't carry. A shop with a 25-minute turnaround and a 60-minute job has a
- * *shorter* pause between cars than inside one, and a mobile detailer driving
- * across town has the opposite. Any fixed rule gets one of those backwards —
- * both were measured doing exactly that.
- *
- * So the decision is made visually, but relative rather than absolute. On real
- * photos a car's own before/after score 0.57-0.70 against each other while
- * unrelated cars score 0.41-0.74: hopelessly overlapping as an absolute
- * threshold, yet within a single roll a car reliably resembles itself more than
- * it resembles the car before it. Comparing each adjacent pair against a
- * baseline taken from bursts that are definitely different cars turns that into
- * a usable signal, and it self-calibrates to each roll.
- *
- * The merges themselves are chosen by dynamic programming over the sequence, so
- * the result is the best consistent set of pairings rather than whatever a
- * left-to-right greedy pass happened to grab first.
- */
-function groupBursts(bursts: Photo[][], settings: ClusterSettings): Photo[][] {
-  if (bursts.length <= 1) return bursts
-  const ceiling = settings.carGapMinutes * 60_000
-
-  const gapAfter = (i: number) =>
-    bursts[i + 1][0].takenAt - bursts[i][bursts[i].length - 1].takenAt
-
-  // With only two bursts there's nothing to calibrate against; if they're close
-  // enough in time, one car is much the likelier reading.
-  if (bursts.length === 2) {
-    return gapAfter(0) <= ceiling ? [[...bursts[0], ...bursts[1]]] : bursts
-  }
-
-  const adjacent: number[] = []
-  for (let i = 0; i < bursts.length - 1; i++) {
-    adjacent.push(burstAffinity(bursts[i], bursts[i + 1]))
-  }
-
-  /* Each boundary is judged against its own neighbours rather than against a
-     global cut-off.
-
-     Bursts alternate: inside a car, between cars, inside the next car. So a
-     boundary that belongs inside a car scores higher than the boundaries on
-     either side of it, whatever the absolute numbers are. Local contrast
-     captures that directly and needs no calibration, which matters because
-     every global threshold tried here helped one scenario and broke another —
-     a percentile strict enough for jobs with no after photo missed half the
-     pairs on real photographs, and vice versa. */
-  const localValue = (i: number): number => {
-    const neighbours: number[] = []
-    if (i > 0) neighbours.push(adjacent[i - 1])
-    if (i + 1 < adjacent.length) neighbours.push(adjacent[i + 1])
-    if (!neighbours.length) return 0
-    const mean = neighbours.reduce((a, b) => a + b, 0) / neighbours.length
-    return adjacent[i] - mean
-  }
-
-  /* A small time term, to break ties the pixels can't.
-
-     Six silver cars through the same bay look identical to any descriptor, so
-     every adjacent affinity lands on top of every other and the merges become
-     arbitrary. The clock still has something to say there — a job is shorter
-     than the wait for the next car — so a shorter-than-typical gap nudges
-     toward "same car". It stays deliberately small: where the cars actually
-     differ the visual term is far larger and wins, which matters because the
-     sign of this hint flips in a busy shop, where the turnaround is shorter
-     than the job. */
-  const gapList = adjacent.map((_, i) => gapAfter(i)).sort((a, b) => a - b)
-  const medianGap = gapList[Math.floor(gapList.length / 2)] || 1
-  const TIME_HINT = 0.05
-
-  const value = adjacent.map((_, i) => {
-    const g = gapAfter(i)
-    if (g > ceiling) return Number.NEGATIVE_INFINITY
-    const timeScore = (medianGap - g) / (medianGap + g)
-    return localValue(i) + timeScore * TIME_HINT
-  })
-
-  const n = bursts.length
-  const dp = new Array<number>(n + 1).fill(0)
-  const merged = new Array<boolean>(n + 1).fill(false)
-  for (let i = 2; i <= n; i++) {
-    const skip = dp[i - 1]
-    const take = value[i - 2] > 0 ? dp[i - 2] + value[i - 2] : Number.NEGATIVE_INFINITY
-    if (take > skip) {
-      dp[i] = take
-      merged[i] = true
-    } else {
-      dp[i] = skip
-      merged[i] = false
-    }
-  }
-
-  const out: Photo[][] = []
-  let i = n
-  while (i > 0) {
-    if (merged[i]) {
-      out.push([...bursts[i - 2], ...bursts[i - 1]])
-      i -= 2
-    } else {
-      out.push(bursts[i - 1])
-      i -= 1
-    }
-  }
-  return out.reverse()
+  return cars
 }
 
 /**
  * Split one car's photos into the before batch and the after batch.
  *
- * The job itself is the longest pause in the car's photos, so the widest
- * internal gap is the divider. If there's no meaningful gap the whole thing is
- * a single burst — someone photographing a car they didn't detail — and there
- * is nothing to pair.
+ * The job itself is the longest pause among the car's photos, so the widest
+ * internal gap is the divider. A car photographed in one go has no meaningful
+ * gap and nothing to pair.
  */
-function splitBeforeAfter(
-  photos: Photo[],
-  burstGapMs: number,
-): { before: Photo[]; after: Photo[] } | null {
+function splitBeforeAfter(photos: Photo[]): { before: Photo[]; after: Photo[] } | null {
   if (photos.length < 2) return null
 
   let widest = 0
@@ -240,92 +126,69 @@ function splitBeforeAfter(
       at = i
     }
   }
-  if (at < 0 || widest < burstGapMs) return null
 
+  // Under three minutes is one continuous walk-around, not a job.
+  if (at < 0 || widest < 180_000) return null
   return { before: photos.slice(0, at), after: photos.slice(at) }
 }
 
 /**
- * Pair up a car's before batch with its after batch.
+ * Suggest before/after pairs within a set of photos.
  *
- * Two pieces of evidence, deliberately combined rather than gated:
- *
- *   - Walk-around order. Position within the batch, normalised, because the
- *     first shot of the after batch usually answers the first shot of the
- *     before batch.
- *   - Visual similarity, which on real photos ranks usefully even though it
- *     can't decide on its own.
- *
- * Assignment is greedy on the combined score, highest first, each photo claimed
- * once. Everything proposed is left unconfirmed for the user to wave through.
- */
-function pairBatches(
-  before: Photo[],
-  after: Photo[],
-  settings: ClusterSettings,
-): Pair[] {
-  interface Candidate {
-    a: Photo
-    b: Photo
-    score: number
-    visual: number
-  }
-
-  const candidates: Candidate[] = []
-  for (let i = 0; i < before.length; i++) {
-    for (let j = 0; j < after.length; j++) {
-      const visual = similarity(before[i], after[j])
-
-      /* Walk-around order, by absolute position in each batch. Normalising to
-         0-1 first looks tidier but misaligns the moment the batches differ in
-         size — six before shots against seven after shots then rates the 6th
-         against the 7th as a perfect match, which is how stray detail shots
-         start stealing partners. */
-      const spread = Math.max(2, Math.floor(Math.max(before.length, after.length) / 2))
-      const order = Math.max(0, 1 - Math.abs(i - j) / spread)
-
-      candidates.push({
-        a: before[i],
-        b: after[j],
-        visual,
-        score: visual * (1 - settings.orderWeight) + order * settings.orderWeight,
-      })
-    }
-  }
-
-  candidates.sort((x, y) => y.score - x.score)
-
-  const claimed = new Set<string>()
-  const pairs: Pair[] = []
-  for (const c of candidates) {
-    if (claimed.has(c.a.id) || claimed.has(c.b.id)) continue
-    claimed.add(c.a.id)
-    claimed.add(c.b.id)
-    pairs.push({
-      id: nextPairId(),
-      beforeId: c.a.id,
-      afterId: c.b.id,
-      // Report the visual score: it's what the user is being asked to judge.
-      confidence: Math.max(0, Math.min(1, c.visual)),
-      confirmed: false,
-    })
-  }
-
-  // Present the strongest suggestions first so the easy yeses come early.
-  return pairs.sort((x, y) => y.confidence - x.confidence)
-}
-
-/**
- * Suggest pairs inside an arbitrary set of photos.
- *
- * Used when the user merges, splits or moves photos by hand and the suggestions
- * need redoing for the new arrangement.
+ * The scoring is mostly what the two photos look like. Walk-around order gets a
+ * small say — people do tend to circle a car the same way twice — but only
+ * enough to break ties between similar candidates, never enough to pair a wheel
+ * with a dashboard because they happened to be third in their batches.
  */
 export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
   const ordered = [...photos].sort((a, b) => a.takenAt - b.takenAt)
-  const split = splitBeforeAfter(ordered, burstThreshold(ordered, settings))
+  const split = splitBeforeAfter(ordered)
   if (!split) return []
-  return pairBatches(split.before, split.after, settings)
+
+  const { before, after } = split
+  const spread = Math.max(2, Math.floor(Math.max(before.length, after.length) / 2))
+
+  const visual: number[][] = []
+  const scores: number[][] = []
+  for (let i = 0; i < before.length; i++) {
+    visual[i] = []
+    scores[i] = []
+    for (let j = 0; j < after.length; j++) {
+      const v = similarity(before[i], after[j])
+      const order = Math.max(0, 1 - Math.abs(i - j) / spread)
+      visual[i][j] = v
+      scores[i][j] = v * (1 - settings.orderWeight) + order * settings.orderWeight
+    }
+  }
+
+  /* Optimal assignment across the whole set, not a greedy pass.
+   *
+   * The floor is applied to what the photos look like, not to the blended
+   * score: order should be allowed to choose between two plausible matches, but
+   * never to lift an implausible one over the bar. */
+  const chosen = assignMax(
+    scores.map((row, i) =>
+      row.map((s, j) => (visual[i][j] < settings.minPairScore ? -Infinity : s)),
+    ),
+    -Infinity,
+  )
+
+  const pairs: Pair[] = []
+  chosen.forEach((j, i) => {
+    if (j < 0) return
+    if (visual[i][j] < settings.minPairScore) return
+    pairs.push({
+      id: nextPairId(),
+      beforeId: before[i].id,
+      afterId: after[j].id,
+      // Report what the user is being asked to judge: how alike they look.
+      confidence: Math.max(0, Math.min(1, visual[i][j])),
+      confirmed: false,
+    })
+  })
+
+  // Strongest first, so the easy yeses come early.
+  return pairs.sort((a, b) => b.confidence - a.confidence)
 }
 
 function labelFor(photos: Photo[], index: number): string {
@@ -340,13 +203,7 @@ export function buildGroups(photos: Photo[], settings: ClusterSettings): Group[]
   if (photos.length === 0) return []
 
   const ordered = [...photos].sort((a, b) => a.takenAt - b.takenAt)
-
-  // Bursts first — each one a walk around a car — then bursts get assembled
-  // into cars by the shape of the pauses between them.
-  const bursts = segmentByGap(ordered, burstThreshold(ordered, settings))
-  const cars = groupBursts(bursts, settings)
-
-  return cars.map((carPhotos, i) => ({
+  return splitIntoCars(ordered, settings).map((carPhotos, i) => ({
     id: nextGroupId(),
     name: labelFor(carPhotos, i),
     photoIds: carPhotos.map((p) => p.id),

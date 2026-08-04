@@ -51,58 +51,84 @@ from the same spot correlate as strongly as a true pair does (0.957–0.997 vs
 0.96–0.98). Paint colour is what persists across a wash and differs between
 cars, so car identity leans on exposure-invariant chromaticity instead.
 
-So the design that survived contact with real photos uses the clock as its
-backbone and treats vision as a ranking signal, never a gate:
+**Two cars in the same driveway are not visually separable.** A later attempt
+used vision to decide where one car ends and the next begins, scoring each
+candidate boundary against the run it sits in. Measured against real photos:
 
-1. **Bursts.** Photos cluster into walk-arounds. The threshold is derived from
-   the roll's own median gap rather than fixed — a fixed twenty minutes welds
-   one car's after shots to the next car's before shots in any shop with a
-   nineteen-minute turnaround, and no downstream cleverness recovers from bursts
-   that are already wrong.
-2. **Cars.** Bursts pair up into cars by dynamic programming over the sequence.
-   Each boundary is scored by *local contrast* — a boundary inside a car scores
-   higher than the boundaries either side of it — because every global threshold
-   tried helped one scenario and broke another. A small time term breaks ties
-   the pixels can't.
-3. **Pairs.** Inside a car, the widest internal pause splits before from after,
-   and shots are matched on walk-around order plus visual similarity. People
-   walk around a car the same way twice, and that prior is worth more than the
-   pixels here.
+```
+one car, boundaries that must NOT be cut   0.94, 0.98, 1.12, 1.12, 1.17
+five cars, boundaries that MUST be cut     0.94, 1.01, 1.03, 1.08
+```
 
-Suggestions are **ranked, never filtered**. A gate tuned on real data would
-either admit everything or reject everything, so the app orders them by
-confidence and asks — which costs one tap each and is honest about what it
-knows.
+The distributions sit on top of each other, and three of four genuine car
+boundaries look *more* alike across the boundary than the photos within a car
+do. There is no threshold in there, and pretending otherwise was worse than
+doing nothing.
+
+So the design that survives contact with real photos is deliberately plain
+about which signal does which job:
+
+1. **Cars are cut on the clock, and only the clock.** A break longer than the
+   set gap starts a new car; no car spans more than the set number of hours.
+   Both are numbers a person can picture and correct. The honest limitation,
+   stated in the settings themselves: two cars finished and started within that
+   gap land together and want one tap on Split. That is the right way round — a
+   merged car costs one tap, whereas a car shattered into six was the complaint
+   that prompted this design.
+2. **Pairs are chosen by optimal assignment** (Hungarian, `src/lib/assign.ts`)
+   over the whole before/after set, so the result is the best *total* matching
+   rather than whatever a greedy first pass grabbed. Greedy commits to the
+   best-looking single pair and lets everything downstream settle for the
+   leftovers, which is how a wheel ends up married to a centre console.
+3. **Walk-around order is off by default.** The idea was sound — people circle a
+   car the same way twice — but it assumes the two batches line up, and they
+   don't: three before shots against five after shots makes index 1 the console
+   rather than the wheel. Measured on a real car, even a 15% weight pulled the
+   wheel onto the console. Available to turn up for anyone who really does shoot
+   a fixed sequence.
+4. **Nothing below the quality floor is proposed.** A leftover photo is left
+   unpaired rather than married to the nearest remaining option.
 
 ## Measured accuracy
 
-Two suites. `npm run test:accuracy` scores eight adversarial synthetic
-scenarios; `npm test:real` runs the whole pipeline over real detailing photos.
+Four suites. `npm run test:assign` checks the assignment solver against brute
+force; `npm run test:accuracy` scores eight synthetic workflows; `npm run
+test:real` and `npm run test:samecar` run the whole pipeline over real
+photographs.
+
+The one that matters most is `test:samecar`, because it is the bug report:
+eight photos of a single Jeep across one job, with ground truth established by
+looking at every photo. It asserts that the car stays one car, that the wheel
+pairs with the wheel, the trunk with the trunk, the exterior with the exterior,
+and that the two centre-console shots with no partner are left alone.
 
 | Scenario | Grouping P/R | Pairing P/R |
 |---|---|---|
+| One Jeep, one job (real photos) | one car | 3/3 exact |
+| Five jobs (real photos) | 100% / 100% | 5/5 exact |
 | 8 cars, clean gaps (64 photos) | 100% / 100% | 100% / 100% |
-| Cars 25 min apart, back to back | 100% / 100% | 100% / 100% |
 | No EXIF, timestamps bunched | 100% / 100% | 100% / 100% |
 | Portrait mixed with landscape | 100% / 100% | 100% / 100% |
 | Half the jobs never got an after | 100% / 100% | 100% / 100% |
 | A 156-photo day, 12 cars | 100% / 100% | 100% / 100% |
-| Handheld drift between shots | 100% / 100% | 100% / 100% |
-| Six near-identical silver cars | 100% / 81% | 100% / 67% |
+| Six near-identical silver cars | 100% / 100% | 100% / 100% |
+| Handheld drift between shots | 100% / 100% | 92% / 92% |
+| Bay shop, 25-min turnaround | *merges — see below* | *merges* |
 
-The last row is the point, not an embarrassment. Six identical silver cars
-through the same bay are genuinely indistinguishable, so the algorithm
-**under-merges and asks** rather than guessing. Precision stays at 100%
-everywhere: it has never yet proposed a wrong pair in any scenario. Loosening
-the threshold lifts that recall and was measured breaking the before-only case
-in exchange — over-merging produces confidently wrong exports, and missing a
-merge costs one tap.
+Two rows are honest failures rather than passes in disguise, and both are
+recorded with explicit tolerances so that any future fix shows up as an
+improvement:
 
-On the real photographs it finds 4 of 5 cars and 4 of 4 proposed pairs are
-correct. The miss is explainable: those fixtures have exactly one photo per
-burst, so each decision rests on a single comparison instead of a whole
-walk-around, and the car it misses has a wet soapy driveway in the before and a
-dry one in the after.
+**The bay shop** turns cars around in 25 minutes while the job itself takes 60.
+No gap threshold can separate those — any value large enough to hold one car
+together is larger than the pause before the next one. That workflow needs the
+Split button.
+
+**Handheld drift** loses two pairs of twenty-four with walk-around order
+switched off. That switch is what stopped a real wheel being married to a real
+centre console, and this is the price, paid in a synthetic case where every
+angle drifts.
+
 
 ## Using it
 

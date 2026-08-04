@@ -37,9 +37,13 @@ export async function startServer(port, { mode = 'dev', timeoutMs = 120_000 } = 
   const proc = spawn('npx', args, { stdio: 'ignore' })
 
   let exited = false
+  let serving = false
   proc.on('exit', (code) => {
     exited = true
-    if (code) console.error(`vite exited early with code ${code}`)
+    /* Only while starting up. Every suite kills the server when it finishes,
+       and vite exits non-zero on SIGTERM — reporting that as a failure put a
+       scary line in the log of a run that passed. */
+    if (code && !serving) console.error(`vite exited early with code ${code}`)
   })
 
   const base = `http://127.0.0.1:${port}`
@@ -48,7 +52,10 @@ export async function startServer(port, { mode = 'dev', timeoutMs = 120_000 } = 
     if (exited) throw new Error(`vite (${mode}) exited before serving on ${port}`)
     try {
       const res = await fetch(base)
-      if (res.ok) return { proc, base }
+      if (res.ok) {
+        serving = true
+        return { proc, base }
+      }
     } catch {
       /* not listening yet */
     }

@@ -107,10 +107,12 @@ export interface SavedPreset {
 }
 
 export interface ClusterSettings {
-  /** A burst is one walk around the car — photos closer than this. */
-  burstGapMinutes: number
-  /** Bursts closer together than this belong to the same car. */
-  carGapMinutes: number
+  /** A break this long means the next photo belongs to a different car. */
+  newCarGapMinutes: number
+  /** No car spans longer than this, end to end. */
+  maxCarSpanHours: number
   /** 0 trusts only how photos look; 1 trusts only walk-around order. */
   orderWeight: number
+  /** Below this match, no pair is suggested at all. */
+  minPairScore: number
 }
