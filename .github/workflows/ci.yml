@@ -24,12 +24,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Pure unit test, no browser: the assignment solver against brute force.
-      - name: Assignment solver
-        run: npm run test:assign
-
       - name: Install Chromium for the browser-driven tests
         run: npx playwright install --with-deps chromium
+
+      # The assignment solver against brute force. It runs in the browser like
+      # everything else, because that's how the TypeScript source gets loaded.
+      - name: Assignment solver
+        run: npm run test:assign
 
       # End-to-end drives the real UI and inspects the ZIP that comes out.
       - name: End-to-end
