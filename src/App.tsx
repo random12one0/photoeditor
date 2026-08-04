@@ -9,7 +9,12 @@ import StyleView from './components/StyleView'
 import { APP_NAME } from './brand'
 import { clearBitmapCache, dropFromCache } from './lib/bitmapCache'
 import { releaseScratch } from './lib/canvasPool'
-import { DEFAULT_CLUSTER_SETTINGS, buildGroups, findPairs } from './lib/cluster'
+import {
+  DEFAULT_CLUSTER_SETTINGS,
+  buildGroups,
+  findPairs,
+  resuggestGroup,
+} from './lib/cluster'
 import { refingerprint } from './lib/ingest'
 import {
   clearSession,
@@ -205,6 +210,45 @@ export default function App() {
       setStage('cars')
     },
     [clusterSettings, checkpoint],
+  )
+
+  /**
+   * Re-solve one car's suggestions around what the user has said so far.
+   *
+   * Confirmed pairs are kept, rejected combinations stay rejected, and
+   * everything else is matched again from scratch. Called after every rejection,
+   * because a rejection frees a photo and the rest of the car should get the
+   * chance to use it.
+   */
+  const resuggest = useCallback(
+    (groupId: string) => {
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === groupId
+            ? { ...g, pairs: resuggestGroup(g, photoMap, clusterSettings) }
+            : g,
+        ),
+      )
+    },
+    [photoMap, clusterSettings],
+  )
+
+  /** Throw away every suggestion *and* every rejection for one car. */
+  const rematchGroup = useCallback(
+    (groupId: string) => {
+      checkpoint('re-match car')
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id !== groupId) return g
+          const photos = g.photoIds
+            .map((id) => photoMap.get(id))
+            .filter((p): p is Photo => Boolean(p))
+          return { ...g, rejected: [], pairs: findPairs(photos, clusterSettings) }
+        }),
+      )
+      notify('Car matched again from scratch', true)
+    },
+    [photoMap, clusterSettings, checkpoint, notify],
   )
 
   const regroup = useCallback(
@@ -589,6 +633,8 @@ export default function App() {
           photoMap={photoMap}
           preset={preset}
           onUpdateGroup={updateGroup}
+          onResuggest={resuggest}
+          onRematch={rematchGroup}
           onNext={() => setStage('style')}
           notify={notify}
         />

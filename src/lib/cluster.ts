@@ -212,6 +212,16 @@ function groupSameTake(photos: Photo[]): Photo[][] {
   )
 }
 
+/** How a rejection is keyed. */
+export const rejectionKey = (beforeId: string, afterId: string) => `${beforeId}|${afterId}`
+
+export interface PairingConstraints {
+  /** Combinations the user has said are wrong, as rejectionKey strings. */
+  forbidden?: ReadonlySet<string>
+  /** Photos already settled in a confirmed pair, so not up for assignment. */
+  taken?: ReadonlySet<string>
+}
+
 /**
  * Suggest before/after pairs within a set of photos.
  *
@@ -219,15 +229,36 @@ function groupSameTake(photos: Photo[]): Photo[][] {
  * small say — people do tend to circle a car the same way twice — but only
  * enough to break ties between similar candidates, never enough to pair a wheel
  * with a dashboard because they happened to be third in their batches.
+ *
+ * `constraints` is what makes rejecting a suggestion mean something. Saying "no,
+ * that wheel is not that console" is information about the *whole* car, not just
+ * about that one card: the console it was wrongly offered is now free for
+ * whichever before shot actually wants it. Feeding rejections back in and
+ * re-solving is the only way that information reaches anywhere.
+ *
+ * The before/after split is always computed from every photo in the car, not
+ * just the free ones. Otherwise confirming pairs would gradually move the
+ * boundary between the two passes, and a car could end up split somewhere that
+ * has nothing to do with when the work happened.
  */
-export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
+export function findPairs(
+  photos: Photo[],
+  settings: ClusterSettings,
+  constraints: PairingConstraints = {},
+): Pair[] {
   const ordered = [...photos].sort((a, b) => a.takenAt - b.takenAt)
   const split = splitBeforeAfter(ordered)
   if (!split) return []
 
   /* Match one take per angle, not one photo per angle. */
-  const beforeTakes = groupSameTake(split.before)
-  const afterTakes = groupSameTake(split.after)
+  const taken = constraints.taken ?? new Set<string>()
+  const forbidden = constraints.forbidden ?? new Set<string>()
+
+  /* Whole takes drop out once any of their shots is spoken for: the group
+     exists to offer one candidate per angle, and an angle whose pick is already
+     confirmed has nothing left to offer. */
+  const beforeTakes = groupSameTake(split.before).filter((t) => !t.some((p) => taken.has(p.id)))
+  const afterTakes = groupSameTake(split.after).filter((t) => !t.some((p) => taken.has(p.id)))
   const before = beforeTakes.map((t) => t[0])
   const after = afterTakes.map((t) => t[0])
 
@@ -239,7 +270,8 @@ export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
     visual[i] = []
     scores[i] = []
     for (let j = 0; j < after.length; j++) {
-      const v = similarity(before[i], after[j])
+      const rejected = forbidden.has(rejectionKey(before[i].id, after[j].id))
+      const v = rejected ? -Infinity : similarity(before[i], after[j])
       const order = Math.max(0, 1 - Math.abs(i - j) / spread)
       visual[i][j] = v
       scores[i][j] = v * (1 - settings.orderWeight) + order * settings.orderWeight
@@ -291,6 +323,39 @@ export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
 
   // Strongest first, so the easy yeses come early.
   return pairs.sort((a, b) => b.confidence - a.confidence)
+}
+
+/**
+ * Re-suggest a car's pairs, keeping what the user has confirmed.
+ *
+ * This is the answer to a flaw that made the review screen a dead end: pressing
+ * "try another" walked one before shot down its own private list of runners-up
+ * and told nothing else about the car. So a wheel with no after in the set could
+ * be offered every remaining photo in turn, burning each one — and every
+ * candidate it burned was simply gone, never offered to the before shot that
+ * actually wanted it. Ten photos could end up unsorted because of a single
+ * unpartnerable wheel.
+ *
+ * Rejecting is information about the whole car. Re-solving is how it gets there:
+ * the rejected combination is forbidden, everything confirmed is locked, and the
+ * assignment runs again over what is left. A photo freed by one rejection is
+ * immediately available to whichever before shot scores best on it.
+ */
+export function resuggestGroup(
+  group: Group,
+  photoMap: Map<string, Photo>,
+  settings: ClusterSettings,
+): Pair[] {
+  const photos = group.photoIds
+    .map((id) => photoMap.get(id))
+    .filter((p): p is Photo => Boolean(p))
+
+  const confirmed = group.pairs.filter((p) => p.confirmed)
+  const taken = new Set(confirmed.flatMap((p) => [p.beforeId, p.afterId]))
+  const forbidden = new Set(group.rejected ?? [])
+
+  const suggestions = findPairs(photos, settings, { forbidden, taken })
+  return [...confirmed, ...suggestions]
 }
 
 function labelFor(photos: Photo[], index: number): string {

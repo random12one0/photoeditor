@@ -42,6 +42,14 @@ export interface Group {
   name: string
   photoIds: string[]
   pairs: Pair[]
+  /**
+   * Combinations the user has rejected, as `beforeId|afterId`.
+   *
+   * Kept on the car rather than on the pair because that is the scope the
+   * information actually has: saying two photos don't go together frees both of
+   * them for everything else, and the whole car is re-solved around it.
+   */
+  rejected?: string[]
 }
 
 export interface Pair {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { haptic } from '../lib/share'
+import { rejectionKey } from '../lib/cluster'
 import type { Group, Pair, Photo, StylePreset } from '../types'
 import Icon from './Icon'
 import PairByHand from './PairByHand'
@@ -10,6 +11,10 @@ interface Props {
   photoMap: Map<string, Photo>
   preset: StylePreset
   onUpdateGroup: (groupId: string, updater: (g: Group) => Group, label?: string) => void
+  /** Re-solve one car's suggestions, honouring confirmations and rejections. */
+  onResuggest: (groupId: string) => void
+  /** Throw away every suggestion and rejection for a car and start it over. */
+  onRematch: (groupId: string) => void
   onNext: () => void
   notify: (msg: string, undoable?: boolean) => void
 }
@@ -81,6 +86,8 @@ export default function PairView({
   photoMap,
   preset,
   onUpdateGroup,
+  onResuggest,
+  onRematch,
   onNext,
   notify,
 }: Props) {
@@ -125,59 +132,50 @@ export default function PairView({
   }, [group, current, onUpdateGroup])
 
   /**
-   * "Not a pair" — try the next-best partner rather than giving up.
+   * "Not a pair" — record it, then re-solve the whole car around it.
    *
-   * Deleting the suggestion outright throws away everything the matcher knows
-   * about this photo and leaves the user to find its partner by hand. The
-   * runners-up are already ranked, so saying no walks down that list. Only when
-   * it runs out is the pair actually dropped, and then the photo lands in the
-   * hand-pairing panel where it can be matched with anything at all.
+   * The first version of this walked one before shot down a private list of
+   * runners-up and told nothing else about the car, which made the screen a dead
+   * end: a wheel with no after in the set could burn through every remaining
+   * photo in turn, and each one it burned was gone rather than offered to the
+   * before shot that actually wanted it. Ten photos could finish unsorted
+   * because of one unpartnerable wheel.
+   *
+   * Rejecting is information about the car, not about the card. Recording it and
+   * re-solving is how that information reaches everything else.
    */
   const rejectCurrent = useCallback(() => {
     if (!group || !current) return
-    const next = current.runnersUp?.[0]
     haptic([8, 40, 8])
-
-    if (!next) {
-      onUpdateGroup(
-        group.id,
-        (g) => ({ ...g, pairs: g.pairs.filter((p) => p.id !== current.id) }),
-        'reject pair',
-      )
-      return
-    }
-
+    const key = rejectionKey(current.beforeId, current.afterId)
     onUpdateGroup(
       group.id,
-      (g) => ({
-        ...g,
-        pairs: g.pairs.map((p) =>
-          p.id === current.id
-            ? {
-                ...p,
-                afterId: next.id,
-                confidence: next.score,
-                runnersUp: p.runnersUp?.slice(1),
-                /* The alternates belonged to the take that just left. */
-                afterAlternates: undefined,
-              }
-            : p,
-        ),
-      }),
-      'try the next match',
+      (g) => ({ ...g, rejected: [...new Set([...(g.rejected ?? []), key])] }),
+      'not a pair',
     )
-  }, [group, current, onUpdateGroup])
+    onResuggest(group.id)
+  }, [group, current, onUpdateGroup, onResuggest])
 
-  /** Drop the suggestion entirely, without walking the runners-up. */
+  /**
+   * "Neither" — this before shot has no partner anywhere in this car.
+   *
+   * Forbids it against every after shot at once, so re-solving never offers it
+   * again, and frees whatever it was holding for the rest of the car. That is
+   * the difference from rejecting: one says "wrong answer", this says "stop
+   * asking about this photo".
+   */
   const dropCurrent = useCallback(() => {
     if (!group || !current) return
     haptic([8, 40, 8])
+    const beforeId = current.beforeId
+    const keys = group.photoIds.map((id) => rejectionKey(beforeId, id))
     onUpdateGroup(
       group.id,
-      (g) => ({ ...g, pairs: g.pairs.filter((p) => p.id !== current.id) }),
+      (g) => ({ ...g, rejected: [...new Set([...(g.rejected ?? []), ...keys])] }),
       'no partner',
     )
-  }, [group, current, onUpdateGroup])
+    onResuggest(group.id)
+  }, [group, current, onUpdateGroup, onResuggest])
 
   const swapCurrent = useCallback(() => {
     if (!group || !current) return
@@ -531,11 +529,20 @@ export default function PairView({
                 </div>
               </div>
 
-              {/* Rarer than the two verdicts, so it sits outside the thumb zone
-                  rather than competing with them for it. */}
+              {/* Rarer than the two verdicts, so these sit outside the thumb
+                  zone rather than competing with them for it. */}
               <div className="review-extra">
                 <button className="btn ghost sm" onClick={dropCurrent} data-testid="no-partner">
                   Neither — this one has no partner
+                </button>
+                <button
+                  className="btn ghost sm"
+                  onClick={() => onRematch(group.id)}
+                  data-testid="rematch"
+                  title="Forget every yes and no for this car and match it again"
+                >
+                  <Icon name="undo" size={15} />
+                  Start this car over
                 </button>
               </div>
 
@@ -566,6 +573,16 @@ export default function PairView({
                   ? ` · ${unpaired.length} photo${unpaired.length === 1 ? '' : 's'} left over`
                   : ' · every photo accounted for'}
               </p>
+              <div className="review-extra">
+                <button
+                  className="btn ghost sm"
+                  onClick={() => onRematch(group.id)}
+                  data-testid="rematch-done"
+                >
+                  <Icon name="undo" size={15} />
+                  Start this car over
+                </button>
+              </div>
               {groupIndex < groups.length - 1 ? (
                 <button className="btn primary" onClick={nextGroup}>
                   Next car

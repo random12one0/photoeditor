@@ -72,6 +72,13 @@ const shown = () =>
     if (!figs.length) return null
     return {
       pct: document.querySelector('.match .mono')?.textContent,
+      /* The whole combination. Re-solving reorders the queue, so consecutive
+         cards are often different before shots — what must never repeat is a
+         pairing the user has already rejected. */
+      combo:
+        (figs[0]?.querySelector('img')?.getAttribute('src') ?? '?') +
+        ' + ' +
+        (figs[1]?.querySelector('img')?.getAttribute('src') ?? '?'),
       rejectLabel: document.querySelector('[data-testid=reject]')?.innerText.trim(),
     }
   })
@@ -87,8 +94,9 @@ check(
 )
 
 const seenPct = [first.pct]
+const seenCombos = [first.combo]
 let steps = 0
-while (steps < 6) {
+while (steps < 8) {
   const before = await shown()
   if (!before || before.rejectLabel !== 'Try another') break
   await page.click('[data-testid=reject]')
@@ -97,13 +105,14 @@ while (steps < 6) {
   if (!after) break
   steps++
   seenPct.push(after.pct)
+  seenCombos.push(after.combo)
 }
 console.log(`  walked ${steps} candidate(s): ${seenPct.join(' → ')}`)
 check('rejecting produced a different candidate', steps >= 1)
 check(
-  'each fallback is a distinct match strength',
-  new Set(seenPct).size === seenPct.length,
-  seenPct.join(', '),
+  'a rejected combination is never offered again',
+  new Set(seenCombos).size === seenCombos.length,
+  `${seenCombos.length} cards, ${new Set(seenCombos).size} distinct combinations`,
 )
 check(
   'the card is still up — the photo was not abandoned',
@@ -133,7 +142,27 @@ if (exhausted) {
   check('a card was still showing to check the exhausted label', false)
 }
 
-console.log('\n[3] "Neither" drops it in one tap, whatever is left to try')
+console.log('\n[3] Rejected candidates come back for other before shots')
+/* The reported flaw: saying "try another" burned each candidate for good, so a
+   before shot with no partner could consume every remaining photo and leave the
+   whole car unsorted. A rejection frees both photos, and the car is re-solved
+   around it — so the photos that were passed over must still be reachable. */
+const reachable = await page.evaluate(() => {
+  /* Every photo is in exactly one of three places: a pair (confirmed or still
+     queued — the chip counts both), or the leftovers panel. */
+  const chip = document.querySelector('.group-strip .chip-count')?.textContent ?? '0/0'
+  const pairs = Number(chip.split('/')[1] ?? 0)
+  const leftover = document.querySelectorAll('[data-testid=pair-by-hand] .handpair-tile').length
+  return { pairs, leftover }
+})
+const accounted = reachable.pairs * 2 + reachable.leftover
+check(
+  'no photo has gone missing — every one is in a pair or in the leftovers',
+  accounted === 9,
+  `${reachable.pairs} pair(s) x2 + ${reachable.leftover} leftover = ${accounted} of 9`,
+)
+
+console.log('\n[4] "Neither" drops it in one tap, whatever is left to try')
 const beforeCount = await page.locator('[data-testid=pair-by-hand] .handpair-tile').count()
 if ((await page.locator('[data-testid=review-images]').count()) > 0) {
   const label = (await shown())?.rejectLabel
@@ -141,15 +170,15 @@ if ((await page.locator('[data-testid=review-images]').count()) > 0) {
   await page.waitForTimeout(250)
   const afterCount = await page.locator('[data-testid=pair-by-hand] .handpair-tile').count()
   check(
-    'both photos went straight to the hand-pairing panel',
-    afterCount >= beforeCount + 2,
+    'the before shot is no longer offered anything',
+    afterCount > beforeCount,
     `${beforeCount} → ${afterCount} leftovers (reject said "${label}")`,
   )
 } else {
   check('a card was still showing to test Neither', false, 'queue empty')
 }
 
-console.log('\n[4] Console health')
+console.log('\n[5] Console health')
 check('no page errors', pageErrors.length === 0, pageErrors.join('; ') || 'clean')
 
 await browser.close()
