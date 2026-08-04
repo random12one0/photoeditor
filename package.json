@@ -12,7 +12,7 @@
     "test:accuracy": "node test/stress.mjs",
     "test:diagnose": "node test/diagnose.mjs",
     "test:shots": "node test/shots.mjs",
-    "test:all": "node test/assign.test.mjs && node test/readahead.test.mjs && node test/e2e.mjs && node test/stress.mjs && node test/real-photos.mjs && node test/samecar.mjs && node test/takes.mjs && node test/handpair.mjs",
+    "test:all": "node test/assign.test.mjs && node test/readahead.test.mjs && node test/decode.test.mjs && node test/e2e.mjs && node test/stress.mjs && node test/real-photos.mjs && node test/samecar.mjs && node test/takes.mjs && node test/handpair.mjs",
     "test:real": "node test/real-photos.mjs",
     "test:diagnose:real": "node test/diagnose-real.mjs",
     "test:measure": "node test/measure.mjs",
@@ -23,7 +23,8 @@
     "test:diagnose:takes": "node test/diagnose-takes.mjs",
     "test:handpair": "node test/handpair.mjs",
     "test:readahead": "node test/readahead.test.mjs",
-    "test:diagnose:interior": "node test/diagnose-interior.mjs"
+    "test:diagnose:interior": "node test/diagnose-interior.mjs",
+    "test:decode": "node test/decode.test.mjs"
   },
   "dependencies": {
     "exifr": "^7.1.3",

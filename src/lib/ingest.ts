@@ -16,23 +16,47 @@ import { bitmapToObjectUrl, decodeToProxy, extractGrid } from './imaging'
 let idCounter = 0
 const nextId = () => `p${Date.now().toString(36)}_${(idCounter++).toString(36)}`
 
-/** Pull the real capture time out of EXIF, falling back to the file's mtime. */
-async function readTakenAt(
+/**
+ * Read the capture time and pixel dimensions out of EXIF in one pass.
+ *
+ * Both come from the same header, so parsing once and using it for both saves a
+ * second walk over the file — and the dimensions are what let the decoder skip
+ * building a full-resolution bitmap it is only going to shrink.
+ */
+async function readHeader(
   file: File,
   bytes: ArrayBuffer | null,
-): Promise<{ takenAt: number; approximate: boolean }> {
+): Promise<{
+  takenAt: number
+  approximate: boolean
+  size: { width: number; height: number } | null
+}> {
+  let size: { width: number; height: number } | null = null
   try {
     const tags = await exifr.parse(bytes ?? file, {
-      pick: ['DateTimeOriginal', 'CreateDate', 'ModifyDate'],
+      pick: [
+        'DateTimeOriginal',
+        'CreateDate',
+        'ModifyDate',
+        'ExifImageWidth',
+        'ExifImageHeight',
+        'ImageWidth',
+        'ImageHeight',
+      ],
     })
+    const w = tags?.ExifImageWidth ?? tags?.ImageWidth
+    const h = tags?.ExifImageHeight ?? tags?.ImageHeight
+    if (typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0) {
+      size = { width: w, height: h }
+    }
     const raw = tags?.DateTimeOriginal ?? tags?.CreateDate ?? tags?.ModifyDate
     if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
-      return { takenAt: raw.getTime(), approximate: false }
+      return { takenAt: raw.getTime(), approximate: false, size }
     }
   } catch {
     // Not all files carry EXIF (screenshots, exports, PNGs). Fall through.
   }
-  return { takenAt: file.lastModified || Date.now(), approximate: true }
+  return { takenAt: file.lastModified || Date.now(), approximate: true, size }
 }
 
 export interface IngestProgress {
@@ -103,6 +127,9 @@ export async function* readAhead(
 export async function ingestFiles(
   files: File[],
   onProgress?: (p: IngestProgress) => void,
+  /* Called the moment each photo is ready, so the screen can fill in as the
+     import runs instead of staying blank until the last one lands. */
+  onPhoto?: (photo: Photo) => void,
 ): Promise<{ photos: Photo[]; failures: { name: string; reason: string }[] }> {
   const photos: Photo[] = []
   const failures: { name: string; reason: string }[] = []
@@ -130,16 +157,18 @@ export async function ingestFiles(
       /* Decode from the bytes already in hand rather than the File, so the
          photo isn't fetched from iCloud a second time. */
       const source = new Blob([bytes], { type: file.type || 'image/jpeg' })
-      const { bitmap, width, height } = await decodeToProxy(source)
+      /* Header first: it is cheap, and its dimensions let the decode below skip
+         building a full-resolution bitmap. */
+      const { takenAt, approximate, size } = await readHeader(file, bytes)
+      const { bitmap, width, height } = await decodeToProxy(source, size)
       const hashGrid = extractGrid(bitmap, 9, 8)
       const colorGrid = extractGrid(bitmap, 32, 32)
       const structureGrid = extractGrid(bitmap, LUMA_GRID, LUMA_GRID)
       const coarseGrid = extractGrid(bitmap, COARSE_GRID, COARSE_GRID)
       const qualityGrid = extractGrid(bitmap, QUALITY_GRID, QUALITY_GRID, 'quality')
       const proxyUrl = await bitmapToObjectUrl(bitmap)
-      const { takenAt, approximate } = await readTakenAt(file, bytes)
 
-      photos.push({
+      const photo: Photo = {
         id: nextId(),
         file,
         name: file.name,
@@ -155,7 +184,9 @@ export async function ingestFiles(
         lumaGridCoarse: lumaGridFromImageData(coarseGrid),
         luma: meanLuma(colorGrid),
         quality: qualityFromImageData(qualityGrid),
-      })
+      }
+      photos.push(photo)
+      onPhoto?.(photo)
 
       bitmap.close()
     } catch (err) {

@@ -17,8 +17,54 @@ export interface DecodedProxy {
 /**
  * Decode a file, honouring EXIF orientation, and downscale it to a proxy.
  * Returns the original pixel dimensions alongside the proxy bitmap.
+ *
+ * `hint` carries the dimensions read out of EXIF, when there are any. With them
+ * the decoder can scale during decode — JPEG can be decoded at a fraction of
+ * full size almost for free — instead of building a 12MP bitmap and throwing
+ * most of it away. On a phone that is the single most expensive step of an
+ * import, and it happens once per photo.
+ *
+ * Only one axis is constrained, never both. Passing a single dimension makes
+ * the browser preserve the aspect ratio, which means that if it applies EXIF
+ * rotation *after* the resize — implementations have differed on this — the
+ * worst case is a proxy somewhat larger than intended rather than a stretched
+ * one. Correctness first; the saving survives either way.
  */
-export async function decodeToProxy(file: Blob): Promise<DecodedProxy> {
+export async function decodeToProxy(
+  file: Blob,
+  hint?: { width: number; height: number } | null,
+): Promise<DecodedProxy> {
+  if (hint && hint.width > 0 && hint.height > 0) {
+    const longEdge = Math.max(hint.width, hint.height)
+    if (longEdge > PROXY_MAX_EDGE) {
+      const landscape = hint.width >= hint.height
+      const bitmap = await createImageBitmap(file, {
+        imageOrientation: 'from-image',
+        resizeQuality: 'high',
+        ...(landscape
+          ? { resizeWidth: PROXY_MAX_EDGE }
+          : { resizeHeight: PROXY_MAX_EDGE }),
+      })
+
+      /* Report the original size the way the bitmap is actually shaped, not the
+         way EXIF listed it. A rotated photo carries its dimensions unswapped in
+         the header, so handing those straight back would call a portrait shot
+         landscape — and that decides how the pair review lays the two photos
+         out. The decoded bitmap has already had the rotation applied, so its
+         aspect ratio is the one to trust; the header only supplies the scale. */
+      const longEdge = Math.max(hint.width, hint.height)
+      const wide = bitmap.width >= bitmap.height
+      const ratio = wide
+        ? bitmap.height / bitmap.width
+        : bitmap.width / bitmap.height
+      return {
+        bitmap,
+        width: wide ? longEdge : Math.round(longEdge * ratio),
+        height: wide ? Math.round(longEdge * ratio) : longEdge,
+      }
+    }
+  }
+
   const full = await createImageBitmap(file, { imageOrientation: 'from-image' })
   const { width, height } = full
   const scale = Math.min(1, PROXY_MAX_EDGE / Math.max(width, height))

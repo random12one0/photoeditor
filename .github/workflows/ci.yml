@@ -35,6 +35,9 @@ jobs:
       - name: Import read-ahead
         run: npm run test:readahead
 
+      - name: Proxy decode
+        run: npm run test:decode
+
       # End-to-end drives the real UI and inspects the ZIP that comes out.
       - name: End-to-end
         run: npm test

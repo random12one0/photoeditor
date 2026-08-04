@@ -21,6 +21,18 @@ const STEPS = [
   ['Export', 'Share straight to Instagram, or download the lot as a ZIP.'],
 ]
 
+/**
+ * iPhone or iPad, including iPadOS pretending to be a Mac.
+ *
+ * Used only to decide whether to show advice about the iOS photo picker, so a
+ * false positive costs a paragraph of irrelevant text and a false negative
+ * costs nothing at all.
+ */
+const isApple =
+  typeof navigator !== 'undefined' &&
+  (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
 /** Rounded hard, because a countdown that reads "3m 47s" invites watching it. */
 function formatDuration(ms: number): string {
   const s = Math.round(ms / 1000)
@@ -41,6 +53,7 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<IngestProgress | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [landed, setLanded] = useState<string[]>([])
 
   const run = useCallback(
     async (fileList: FileList | File[]) => {
@@ -54,8 +67,14 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
 
       setBusy(true)
       setProgress({ done: 0, total: files.length, current: '' })
+      setLanded([])
       try {
-        const { photos, failures } = await ingestFiles(files, setProgress)
+        const { photos, failures } = await ingestFiles(files, setProgress, (photo) => {
+          /* Newest first, and only the last few are kept: this is a sign of life,
+             not a gallery, and a hundred live <img> elements on a phone is the
+             sort of thing that makes an import slower rather than faster. */
+          setLanded((prev) => [photo.proxyUrl, ...prev].slice(0, 12))
+        })
         onImported(photos)
         if (failures.length) {
           notify(
@@ -67,6 +86,7 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
       } finally {
         setBusy(false)
         setProgress(null)
+        setLanded([])
         if (inputRef.current) inputRef.current.value = ''
       }
     },
@@ -140,6 +160,15 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
               </div>
               <div className="ingest-file">{progress.current || 'Finishing up'}</div>
               {remaining && <div className="tiny dim">about {remaining} left</div>}
+              {/* Photos appearing one by one is the difference between "working"
+                  and "hung". The count alone doesn't read as either. */}
+              {landed.length > 0 && (
+                <div className="ingest-strip" data-testid="ingest-strip">
+                  {landed.map((url) => (
+                    <img key={url} src={url} alt="" />
+                  ))}
+                </div>
+              )}
               {/* A hundred photos off iCloud is a genuinely long wait, and a
                   progress bar with no explanation reads as a hang. */}
               {slow && (
@@ -160,6 +189,39 @@ export default function ImportView({ existingCount, onImported, onReset, notify 
             </>
           )}
         </div>
+
+        {/* The long wait after tapping the checkmark happens before this app
+            gets to run at all, so it can't be fixed here — only explained, and
+            it has a fix worth knowing. */}
+        {isApple && !busy && (
+          <div className="card ios-tip">
+            <div className="fieldset-body">
+              <h3>Why the picker sits there after you tap ✓</h3>
+              <p className="tiny muted">
+                iOS converts every selected photo to JPEG before it hands them over,
+                and shows nothing while it does. With a hundred photos that is most
+                of the wait, and it happens before this page can react.
+              </p>
+              <ul className="tiny muted howto">
+                <li>
+                  <strong>Turn the conversion off.</strong> In the picker, tap{' '}
+                  <strong>Options</strong> at the top and set <strong>Format</strong>{' '}
+                  to <strong>Current</strong>. Originals are handed over as-is, and
+                  they're about half the size.
+                </li>
+                <li>
+                  <strong>Pick in batches.</strong> Thirty at a time comes back far
+                  sooner than a hundred, and anything you add joins what's already
+                  here.
+                </li>
+                <li>
+                  <strong>Photos in iCloud download first.</strong> Ones already on
+                  the phone are much quicker.
+                </li>
+              </ul>
+            </div>
+          </div>
+        )}
 
         <div className="steps-list">
           <h3 style={{ marginBottom: 4 }}>How it works</h3>

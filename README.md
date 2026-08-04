@@ -182,8 +182,9 @@ prints the whole score matrix per component if that stops being true.
 
 ## Measured accuracy
 
-Eight suites. `npm run test:assign` and `npm run test:readahead` check the
-assignment solver and the import read-ahead directly; `npm run test:accuracy`
+Nine suites. `npm run test:assign`, `npm run test:readahead` and `npm run
+test:decode` check the assignment solver, the import read-ahead and the proxy
+decode directly; `npm run test:accuracy`
 scores eight synthetic workflows; `npm run test:real`, `npm run test:samecar`,
 `npm run test:takes` and `npm run test:handpair` run the whole pipeline over real
 photographs.
@@ -285,14 +286,46 @@ the only route — NN/G is clear that swipe-only actions aren't discoverable.
 Every spatial value in a style preset is a percentage of canvas width, so the
 320px preview and the 2000px export are proportionally identical.
 
-Importing reads each file once, with three reads in flight. It used to read
-every photo twice — once to decode and once for EXIF — strictly one at a time.
-That is invisible when the photos are on the device and dominant when they are
-not: a photo kept in iCloud has to be downloaded before its bytes can be read,
-so a 150-photo import was 300 serial network round trips with the CPU idle
-throughout. Decoding stays sequential, because decoding a 12MP photo spikes
-memory and doing many at once is what kills the tab on iOS. `npm run
-test:readahead` simulates the latency and measures the overlap.
+## Why importing a hundred photos on an iPhone takes so long
+
+Three separate waits, and only two of them are ours.
+
+**The picker's own wait, which is not ours and cannot be made ours.** After you
+tap the checkmark, iOS converts every selected photo to JPEG before it hands
+anything to the page, showing no progress while it does. The `change` event
+doesn't fire until that finishes, so there is no point at which this app could
+draw a spinner — it hasn't been given the files yet. The `accept` attribute does
+not reliably influence it. What does: in the picker, **Options → Format →
+Current** hands over the originals unconverted, and they're about half the size.
+The app says so on the import screen, on Apple devices only.
+
+**Reading the files.** Each photo used to be read twice — once to decode and
+once for EXIF — strictly one at a time. Invisible when the photos are on the
+device, dominant when they aren't: a photo kept in iCloud has to be downloaded
+before its bytes can be read, so a 150-photo import was 300 serial round trips
+with the CPU idle throughout. Each file is now read once with three reads in
+flight, so the decode of one overlaps the download of the next few. `npm run
+test:readahead` simulates the latency and measures the overlap: 656ms against
+1200ms serial.
+
+**Decoding.** Given the dimensions out of the EXIF header — already parsed, for
+the capture time — the decoder can scale during the decode instead of building a
+12MP bitmap and immediately shrinking it. Measured on a 12MP frame, 10–23% off
+the most expensive step of an import, and more on a phone than on the desktop
+those numbers came from.
+
+Only one axis is ever constrained. Passing a single dimension makes the browser
+preserve the aspect ratio itself, so if it applies EXIF rotation after the
+resize — implementations have differed — the worst case is a proxy larger than
+intended rather than a stretched one. `npm run test:decode` checks that, deliberately
+including a hint that lies about which way round the photo is.
+
+Decoding stays sequential. Decoding a 12MP photo spikes memory, and doing many
+at once is what kills the tab on iOS.
+
+And because a progress bar with a number on it still reads as a hang, photos now
+appear in a strip as they land, newest first. It is the difference between
+"working" and "stuck", and it costs nothing.
 
 Canvases are pooled rather than allocated per operation. iOS Safari caps total
 canvas memory around 384MB and is notorious for holding backing stores after
@@ -316,6 +349,7 @@ npm run test:samecar     # the bug report: one car, one job, eight real photos
 npm run test:takes       # three shots of one angle — does the sharpest win?
 npm run test:handpair    # pairing the leftovers by hand
 npm run test:readahead   # import read-ahead, with the file latency simulated
+npm run test:decode      # decoding straight to proxy size, and its timing
 npm run test:accuracy    # precision/recall across 8 adversarial scenarios
 npm run test:diagnose    # distance distributions on synthetic fixtures
 npm run test:diagnose:real  # …and on real photos. Run before touching a threshold.

@@ -519,6 +519,44 @@ kbd {
   margin: 0;
   max-width: 34ch;
 }
+/* Photos landing one at a time. Newest on the left, fading out along the row,
+   so the eye reads it as motion rather than as a list to inspect. */
+.ingest-strip {
+  display: flex;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  justify-content: center;
+  mask-image: linear-gradient(to right, #000 55%, transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 55%, transparent);
+}
+.ingest-strip img {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  animation: land 0.28s var(--ease);
+}
+@keyframes land {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ingest-strip img {
+    animation: none;
+  }
+}
+
+.ios-tip {
+  margin-top: var(--s4);
+}
+.ios-tip h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
 
 .bar {
   width: 100%;
