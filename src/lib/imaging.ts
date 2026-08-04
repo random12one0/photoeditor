@@ -1,6 +1,6 @@
 /** Image decoding, downscaling and proxy generation. */
 
-import { canvasToBlob, scratch } from './canvasPool'
+import { canvasToBlob, scratch, type ScratchKey } from './canvasPool'
 
 export { canvasToBlob }
 
@@ -50,8 +50,13 @@ export async function decodeFull(file: File): Promise<ImageBitmap> {
  * allocating a canvas each time is what exhausts Safari's canvas memory budget
  * partway through a large import.
  */
-export function extractGrid(bitmap: ImageBitmap, w: number, h: number): ImageData {
-  const canvas = scratch('grid', w, h)
+export function extractGrid(
+  bitmap: ImageBitmap,
+  w: number,
+  h: number,
+  key: ScratchKey = 'grid',
+): ImageData {
+  const canvas = scratch(key, w, h)
   const ctx = canvas.getContext('2d', {
     willReadFrequently: true,
   }) as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D

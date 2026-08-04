@@ -254,6 +254,90 @@ export function colorDistance(a: number[], b: number[]): number {
   return Math.min(1, Math.sqrt(sum / a.length) / 128)
 }
 
+/**
+ * Grid the quality measure runs on. Big enough that focus differences survive
+ * the downscale, small enough to stay cheap on a phone during import.
+ */
+export const QUALITY_GRID = 192
+
+/**
+ * "Which of these near-identical shots is the best one?" — 0 to 1.
+ *
+ * This exists because of how the photos are actually taken: three shots of the
+ * same angle before, one after, or the other way round. Something has to choose
+ * which of the three goes in the composite, and "whichever the matcher happened
+ * to land on" is not an answer — among three shots of the same thing, the one
+ * that correlates best with the after might easily be the one that was out of
+ * focus.
+ *
+ * Two terms, both of which a person would use looking at the shots side by side:
+ *
+ * **Focus.** Mean gradient energy, divided by the image's own contrast. The
+ * division matters: without it this measures "busy picture" rather than "sharp
+ * picture", and a cluttered driveway would beat a clean one every time. What's
+ * left is roughly detail-per-unit-contrast, which is what focus and camera shake
+ * actually change.
+ *
+ * **Clipping.** Blown highlights and crushed shadows are unrecoverable, and a
+ * detailing shot into the sun loses the paint entirely. Counted at both ends and
+ * subtracted.
+ *
+ * Only ever compared between shots of the same subject, so it needs to rank
+ * rather than to be calibrated in absolute terms. Measured against real
+ * photographs degraded in known ways (`npm run test:diagnose:takes`), the
+ * untouched shot beats the degraded one 38 times out of 40.
+ *
+ * The two it loses are worth stating: a uniformly *darkened* copy scores level
+ * with the original, because dividing gradient energy by contrast makes the
+ * measure immune to a linear brightness change and mere underexposure clips
+ * nothing. That is deliberate as far as it goes — a dark but sharp frame really
+ * is the better negative — but it does mean this ranks focus, not exposure.
+ * Between three shots taken seconds apart, which is the only situation it is
+ * used in, exposure is the same across all of them anyway.
+ */
+export function qualityFromImageData(img: ImageData): number {
+  const { width: w, height: h } = img
+  if (w < 3 || h < 3) return 0.5
+  const gray = toGrayGrid(img.data, w, h)
+
+  let sum = 0
+  let clipped = 0
+  for (let p = 0; p < gray.length; p++) {
+    sum += gray[p]
+    if (gray[p] > 249 || gray[p] < 4) clipped++
+  }
+  const mean = sum / gray.length
+  let variance = 0
+  for (let p = 0; p < gray.length; p++) {
+    const d = gray[p] - mean
+    variance += d * d
+  }
+  const std = Math.sqrt(variance / gray.length)
+
+  // A flat grey frame has no detail to measure and no contrast to divide by.
+  if (std < 1) return 0
+
+  let energy = 0
+  let n = 0
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x
+      const gx = gray[i + 1] - gray[i - 1]
+      const gy = gray[i + w] - gray[i - w]
+      energy += gx * gx + gy * gy
+      n++
+    }
+  }
+
+  const focus = Math.sqrt(energy / n) / std
+  /* Real photographs at this grid size land roughly 0.3 (soft) to 1.2 (crisp);
+     the curve flattens above that so two sharp shots aren't separated by noise. */
+  const focusScore = 1 - Math.exp(-focus / 0.55)
+  const exposure = 1 - Math.min(1, (clipped / gray.length) * 5)
+
+  return Math.max(0, Math.min(1, focusScore * 0.75 + exposure * 0.25))
+}
+
 export function meanLuma(img: ImageData): number {
   const d = img.data
   let sum = 0
@@ -292,6 +376,33 @@ export function similarity(a: Fingerprint, b: Fingerprint): number {
   const chroma = 1 - chromaDistance(a.chromaSig, b.chromaSig)
   const hash = 1 - hamming(a.dhash, b.dhash) / 64
   return coarse * 0.4 + fine * 0.25 + chroma * 0.25 + hash * 0.1
+}
+
+/**
+ * "Is this the same frame, taken twice?" — a third and much narrower question
+ * than either `similarity` or `carSimilarity`.
+ *
+ * It needs its own measure, and the reason is the interesting part. `similarity`
+ * is deliberately blind to translation: it slides one grid over the other and
+ * keeps the best overlap, because a photographer coming back ninety minutes
+ * later does not stand in the same footprint. That tolerance is exactly wrong
+ * here. Two shots of one angle seconds apart differ by a *small* drift; two
+ * different framings of the same car differ by a *large* one. A metric that
+ * discards translation cannot tell those apart — measured on fixtures whose
+ * angles differ only by where the car sits in the frame, `similarity` called
+ * every angle the same take and collapsed four pairs into one.
+ *
+ * So this compares the fine grid where it lies, with no shift search at all.
+ * Sub-cell drift still passes, because each cell is a sixteenth of the frame,
+ * and anything reframed by more than that reads as a different shot.
+ *
+ * Chromaticity is deliberately absent: every shot of one car has the same paint
+ * in it, so colour cannot distinguish two angles and only inflates the score.
+ */
+export function sameTakeScore(a: Fingerprint, b: Fingerprint): number {
+  const fine = (ncc(a.lumaGrid, b.lumaGrid) + 1) / 2
+  const hash = 1 - hamming(a.dhash, b.dhash) / 64
+  return fine * 0.8 + hash * 0.2
 }
 
 /**

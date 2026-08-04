@@ -1,6 +1,6 @@
 import type { ClusterSettings, Group, Pair, Photo } from '../types'
 import { assignMax } from './assign'
-import { COARSE_GRID, similarity } from './hash'
+import { COARSE_GRID, sameTakeScore, similarity } from './hash'
 
 /**
  * How photos get sorted into cars and paired up.
@@ -35,10 +35,15 @@ import { COARSE_GRID, similarity } from './hash'
  */
 
 export const DEFAULT_CLUSTER_SETTINGS: ClusterSettings = {
-  /* Longer than a car sits mid-job. A detail leaves the car alone for two or
-     three hours, so anything shorter than that splits one car in half — which
-     is exactly what was happening. */
-  newCarGapMinutes: 240,
+  /* Longer than a car sits mid-job.
+   *
+   * This has to clear the whole job, because of how the photos are actually
+   * taken: every before shot first, then the detail, then every after shot when
+   * the work is finished — around four hours apart, sometimes more. A threshold
+   * at or below that cuts the befores away from the afters and turns one car
+   * into two, which is the failure that was reported. Five hours sits above the
+   * job and still below an overnight break. */
+  newCarGapMinutes: 300,
   /** No car spans longer than this end to end. */
   maxCarSpanHours: 6,
   /* Off by default.
@@ -133,6 +138,81 @@ function splitBeforeAfter(photos: Photo[]): { before: Photo[]; after: Photo[] } 
 }
 
 /**
+ * How alike two shots must be to count as the same take rather than two
+ * different angles of the same car.
+ *
+ * Measured, not guessed — `npm run test:diagnose:takes` prints it. On real
+ * photographs, comparing only the shots this ever compares:
+ *
+ *   same take (the same frame, re-shot handheld)   never below 0.737
+ *   different angle, within one batch              never above 0.630
+ *
+ * A gap 0.107 wide, so this sits near its midpoint.
+ *
+ * One number in that diagnostic looks like a counterexample and isn't: a true
+ * before/after of the same angle scores 0.80, higher than anything here. It has
+ * to — it *is* the same framing. It never reaches this comparison, because
+ * befores are only ever grouped against befores and afters against afters.
+ */
+const SAME_TAKE_SCORE = 0.68
+
+/**
+ * Two takes of one angle come seconds apart.
+ *
+ * This is not a formality, and the measurement is what showed it. On the
+ * synthetic fixtures, whose four "angles" are one scene drawn at four positions,
+ * different angles reach 0.745 — above the threshold above, which is set from
+ * real photographs where different angles top out at 0.630. There is no single
+ * score that is safe on both, and the fixtures win that argument: two shots of
+ * one composition at slightly different distances is a thing people do.
+ *
+ * The clock settles it, because taking three shots of one angle is a single act
+ * that takes seconds, while moving to the next angle takes longer. The fixtures'
+ * angles are two minutes apart and are excluded on time alone, whatever they
+ * score. Both gates must pass.
+ */
+const SAME_TAKE_WINDOW_MS = 90_000
+
+/**
+ * Collapse runs of near-identical shots into one candidate each.
+ *
+ * The reason this exists, in the user's words: "I take maybe three pictures of
+ * kinda the same angle... I usually only take one after photo, but I take a lot
+ * of befores." Three befores against one after is not a matching problem — two
+ * of those three have no partner and never did. Handing all three to the
+ * assignment step means it pairs whichever *happens* to correlate best with the
+ * after, and among three shots of one subject that difference is noise. It could
+ * easily hand back the blurred one.
+ *
+ * So near-identical takes are collapsed first, and the survivor is the sharpest
+ * of them. The losers aren't discarded — they're offered on the pair as
+ * alternatives, and still export with their car.
+ *
+ * Ordering within a group is by quality, so index 0 is the pick.
+ */
+function groupSameTake(photos: Photo[]): Photo[][] {
+  const groups: Photo[][] = []
+  for (const photo of photos) {
+    const last = groups[groups.length - 1]
+    /* Compare against the most recent member rather than the group's first:
+       a slow pan across a wheel drifts, and each shot resembles its neighbour
+       more than it resembles where the run started. */
+    const prev = last?.[last.length - 1]
+    const sameTake =
+      prev &&
+      photo.takenAt - prev.takenAt <= SAME_TAKE_WINDOW_MS &&
+      sameTakeScore(prev, photo) >= SAME_TAKE_SCORE
+
+    if (sameTake) last.push(photo)
+    else groups.push([photo])
+  }
+
+  return groups.map((g) =>
+    [...g].sort((a, b) => b.quality - a.quality || a.takenAt - b.takenAt),
+  )
+}
+
+/**
  * Suggest before/after pairs within a set of photos.
  *
  * The scoring is mostly what the two photos look like. Walk-around order gets a
@@ -145,7 +225,12 @@ export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
   const split = splitBeforeAfter(ordered)
   if (!split) return []
 
-  const { before, after } = split
+  /* Match one take per angle, not one photo per angle. */
+  const beforeTakes = groupSameTake(split.before)
+  const afterTakes = groupSameTake(split.after)
+  const before = beforeTakes.map((t) => t[0])
+  const after = afterTakes.map((t) => t[0])
+
   const spread = Math.max(2, Math.floor(Math.max(before.length, after.length) / 2))
 
   const visual: number[][] = []
@@ -177,6 +262,8 @@ export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
   chosen.forEach((j, i) => {
     if (j < 0) return
     if (visual[i][j] < settings.minPairScore) return
+    const beforeAlternates = beforeTakes[i].slice(1).map((p) => p.id)
+    const afterAlternates = afterTakes[j].slice(1).map((p) => p.id)
     pairs.push({
       id: nextPairId(),
       beforeId: before[i].id,
@@ -184,6 +271,8 @@ export function findPairs(photos: Photo[], settings: ClusterSettings): Pair[] {
       // Report what the user is being asked to judge: how alike they look.
       confidence: Math.max(0, Math.min(1, visual[i][j])),
       confirmed: false,
+      ...(beforeAlternates.length ? { beforeAlternates } : {}),
+      ...(afterAlternates.length ? { afterAlternates } : {}),
     })
   })
 

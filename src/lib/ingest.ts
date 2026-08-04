@@ -3,11 +3,13 @@ import type { Photo } from '../types'
 import {
   COARSE_GRID,
   LUMA_GRID,
+  QUALITY_GRID,
   chromaSignature,
   colorSignature,
   dhashFromImageData,
   lumaGridFromImageData,
   meanLuma,
+  qualityFromImageData,
 } from './hash'
 import { bitmapToObjectUrl, decodeToProxy, extractGrid } from './imaging'
 
@@ -61,6 +63,7 @@ export async function ingestFiles(
       const colorGrid = extractGrid(bitmap, 32, 32)
       const structureGrid = extractGrid(bitmap, LUMA_GRID, LUMA_GRID)
       const coarseGrid = extractGrid(bitmap, COARSE_GRID, COARSE_GRID)
+      const qualityGrid = extractGrid(bitmap, QUALITY_GRID, QUALITY_GRID, 'quality')
       const proxyUrl = await bitmapToObjectUrl(bitmap)
       const { takenAt, approximate } = await readTakenAt(file)
 
@@ -79,6 +82,7 @@ export async function ingestFiles(
         lumaGrid: lumaGridFromImageData(structureGrid),
         lumaGridCoarse: lumaGridFromImageData(coarseGrid),
         luma: meanLuma(colorGrid),
+        quality: qualityFromImageData(qualityGrid),
       })
 
       bitmap.close()

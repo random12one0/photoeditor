@@ -18,6 +18,63 @@ let manualCounter = 0
 /** Past this many pixels of drag, releasing commits the verdict. */
 const SWIPE_COMMIT = 96
 
+const clockOf = (ms: number) =>
+  new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
+/**
+ * The other takes of this angle, when there are any.
+ *
+ * Shooting three of one angle and one of the other is normal, so something has
+ * to decide which of the three goes in the composite. It picks the sharpest, and
+ * this is where that decision is shown and overridden — silently choosing on
+ * someone's behalf and never saying so is the part that would feel arbitrary.
+ *
+ * Chronological order, so the strip reads the way the shots were taken and
+ * doesn't reorder itself when the pick changes.
+ */
+function TakeStrip({
+  side,
+  pair,
+  chosen,
+  photoMap,
+  onPick,
+}: {
+  side: 'before' | 'after'
+  pair: Pair
+  chosen: Photo
+  photoMap: Map<string, Photo>
+  onPick: (pairId: string, side: 'before' | 'after', photoId: string) => void
+}) {
+  const alternates = (side === 'before' ? pair.beforeAlternates : pair.afterAlternates) ?? []
+  const takes = [chosen.id, ...alternates]
+    .map((id) => photoMap.get(id))
+    .filter((p): p is Photo => Boolean(p))
+    .sort((a, b) => a.takenAt - b.takenAt)
+
+  // A restored session can reference a photo whose bytes didn't survive.
+  if (takes.length < 2) return null
+
+  return (
+    <div className="take-strip" data-testid={`takes-${side}`}>
+      <span className="tiny dim">{takes.length} shots — sharpest picked</span>
+      <div className="take-row">
+        {takes.map((take) => (
+          <button
+            key={take.id}
+            className={`take${take.id === chosen.id ? ' picked' : ''}`}
+            aria-pressed={take.id === chosen.id}
+            aria-label={`Use the ${side} shot from ${clockOf(take.takenAt)}`}
+            data-photo={take.name}
+            onClick={() => onPick(pair.id, side, take.id)}
+          >
+            <img src={take.proxyUrl} alt="" loading="lazy" draggable={false} />
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function PairView({
   groups,
   photoMap,
@@ -123,6 +180,38 @@ export default function PairView({
           ),
         }),
         'swap pair',
+      )
+    },
+    [group, onUpdateGroup],
+  )
+
+  /**
+   * Swap one of the other takes of the same angle into the pair.
+   *
+   * Done in place — the photo coming out takes the slot of the one going in —
+   * so the strip of thumbnails doesn't reshuffle under the finger that just
+   * tapped it.
+   */
+  const chooseTake = useCallback(
+    (pairId: string, side: 'before' | 'after', photoId: string) => {
+      if (!group) return
+      haptic(6)
+      onUpdateGroup(
+        group.id,
+        (g) => ({
+          ...g,
+          pairs: g.pairs.map((p) => {
+            if (p.id !== pairId) return p
+            const alts = (side === 'before' ? p.beforeAlternates : p.afterAlternates) ?? []
+            if (!alts.includes(photoId)) return p
+            const outgoing = side === 'before' ? p.beforeId : p.afterId
+            const nextAlts = alts.map((id) => (id === photoId ? outgoing : id))
+            return side === 'before'
+              ? { ...p, beforeId: photoId, beforeAlternates: nextAlts }
+              : { ...p, afterId: photoId, afterAlternates: nextAlts }
+          }),
+        }),
+        'change shot',
       )
     },
     [group, onUpdateGroup],
@@ -351,25 +440,29 @@ export default function PairView({
                     <img src={before.proxyUrl} alt="Before" draggable={false} />
                     <figcaption className="review-cap">
                       <span>BEFORE</span>
-                      <span className="mono dim">
-                        {new Date(before.takenAt).toLocaleTimeString([], {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                      </span>
+                      <span className="mono dim">{clockOf(before.takenAt)}</span>
                     </figcaption>
+                    <TakeStrip
+                      side="before"
+                      pair={current}
+                      chosen={before}
+                      photoMap={photoMap}
+                      onPick={chooseTake}
+                    />
                   </figure>
                   <figure>
                     <img src={after.proxyUrl} alt="After" draggable={false} />
                     <figcaption className="review-cap">
                       <span>AFTER</span>
-                      <span className="mono dim">
-                        {new Date(after.takenAt).toLocaleTimeString([], {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                      </span>
+                      <span className="mono dim">{clockOf(after.takenAt)}</span>
                     </figcaption>
+                    <TakeStrip
+                      side="after"
+                      pair={current}
+                      chosen={after}
+                      photoMap={photoMap}
+                      onPick={chooseTake}
+                    />
                   </figure>
                 </div>
               </div>

@@ -16,6 +16,9 @@ type AnyCanvas = HTMLCanvasElement | OffscreenCanvas
 
 export type ScratchKey =
   | 'grid'
+  /* The quality grid is two orders of magnitude larger than the hash grids, so
+     it gets its own canvas rather than resizing 'grid' up and down per photo. */
+  | 'quality'
   | 'proxy'
   | 'backdrop-small'
   | 'backdrop-blur'

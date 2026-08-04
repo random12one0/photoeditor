@@ -23,6 +23,12 @@ export interface Photo {
   lumaGridCoarse: number[]
   /** Mean luminance 0-255. A clean car is usually brighter than a dirty one. */
   luma: number
+  /**
+   * 0-1 shot quality — sharpness less clipping. Only meaningful *between* shots
+   * of the same subject, where it decides which of several near-identical takes
+   * goes in the composite.
+   */
+  quality: number
 }
 
 /** A cluster of photos believed to be the same car / same session. */
@@ -42,6 +48,13 @@ export interface Pair {
   confidence: number
   /** Auto-suggested pairs start unconfirmed; the review screen confirms them. */
   confirmed: boolean
+  /**
+   * Other shots of the same angle, best first, when the same thing was
+   * photographed more than once. `beforeId`/`afterId` hold the pick; these are
+   * what the review screen offers as alternatives to it.
+   */
+  beforeAlternates?: string[]
+  afterAlternates?: string[]
 }
 
 export type OutputRatio = '4:5' | '1:1' | '9:16' | '3:4'

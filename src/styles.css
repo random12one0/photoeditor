@@ -873,6 +873,54 @@ kbd {
   padding: 0 2px;
 }
 
+/* Other takes of the same angle. Deliberately quiet — most pairs have none,
+   and when they do the choice has already been made sensibly. */
+.take-strip {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+.take-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.take {
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  line-height: 0;
+  cursor: pointer;
+  /* 44px of tappable area around a 36px thumbnail, without the thumbnails
+     themselves growing large enough to compete with the photo above them. */
+  padding: 4px;
+  margin: -4px;
+}
+.take img,
+.review-images .take img {
+  width: 36px;
+  height: 36px;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  opacity: 0.45;
+  outline: 1.5px solid transparent;
+  outline-offset: -1.5px;
+  transition:
+    opacity 0.15s var(--ease),
+    outline-color 0.15s var(--ease);
+}
+.take.picked img {
+  opacity: 1;
+  outline-color: var(--text);
+}
+.take:focus-visible img {
+  opacity: 1;
+  outline-color: var(--text);
+}
+
 /* Swipe feedback: the verdict appears over the card as it moves, so the
    gesture's meaning is visible before the user commits to it. */
 .swipe-hint {

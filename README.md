@@ -70,11 +70,15 @@ about which signal does which job:
 
 1. **Cars are cut on the clock, and only the clock.** A break longer than the
    set gap starts a new car; no car spans more than the set number of hours.
-   Both are numbers a person can picture and correct. The honest limitation,
-   stated in the settings themselves: two cars finished and started within that
-   gap land together and want one tap on Split. That is the right way round — a
-   merged car costs one tap, whereas a car shattered into six was the complaint
-   that prompted this design.
+   Both are numbers a person can picture and correct. The gap defaults to five
+   hours because of how the photos are actually taken — every before shot first,
+   then the detail, then every after shot when the work is done, around four
+   hours later. A threshold at or below that cuts the befores away from the
+   afters and turns one car into two. The honest limitation, stated in the
+   settings themselves: two cars finished and started within that gap land
+   together and want one tap on Split. That is the right way round — a merged
+   car costs one tap, whereas a car shattered into six was the complaint that
+   prompted this design.
 2. **Pairs are chosen by optimal assignment** (Hungarian, `src/lib/assign.ts`)
    over the whole before/after set, so the result is the best *total* matching
    rather than whatever a greedy first pass grabbed. Greedy commits to the
@@ -88,13 +92,58 @@ about which signal does which job:
    a fixed sequence.
 4. **Nothing below the quality floor is proposed.** A leftover photo is left
    unpaired rather than married to the nearest remaining option.
+5. **Three shots of one angle count as one.** They're collapsed before matching
+   and the sharpest survives — see below.
+
+**Shooting one angle three times is normal, and it needs an answer.** Three
+before shots against one after isn't a matching problem: two of those three
+never had a partner. Handing all three to the matcher means it pairs whichever
+happens to correlate best with the after, and among three shots of one subject
+that difference is noise — it could just as easily return the blurred one. So
+near-identical takes are collapsed first and the sharpest wins, measured as
+gradient energy over contrast. Dividing by contrast is what stops it preferring
+a cluttered driveway to a clean one. Against real photographs degraded in known
+ways, the untouched shot beats the degraded one 38 times out of 40.
+
+The two it loses are worth stating: a uniformly darkened copy ties with the
+original, because the measure is immune to a linear brightness change by
+construction. It ranks focus, not exposure — and between three shots taken
+seconds apart, exposure is identical anyway.
+
+Deciding *what counts as the same take* took two attempts. The first reused the
+general similarity score, which is deliberately blind to translation, because a
+photographer returning ninety minutes later doesn't stand in the same footprint.
+That tolerance is exactly wrong here: two takes of one angle differ by a small
+drift and two framings of one car differ by a large one, and a metric that
+discards translation can't tell them apart. It collapsed four distinct angles
+into one and cost seven of nine scenarios most of their pairing recall.
+
+The replacement compares the fine grid where it lies, with no shift search. It
+separates on both photo sources — but not at the same threshold:
+
+```
+                          same take (min)   different angle (max)
+real photographs                    0.737                   0.630
+synthetic fixtures                  0.822                   0.745
+```
+
+No single number fits inside both, and the fixtures win that argument — two
+shots of one composition at slightly different distances is a thing people do.
+The clock settles it. Shooting one angle three times is a single act that takes
+seconds, while moving to the next angle takes longer, so the window is 90
+seconds and both gates must pass. The fixtures' angles are two minutes apart and
+never collapse whatever they score, which leaves the threshold free to sit in
+the 0.1-wide gap the real photographs actually have.
+
+The losers aren't discarded. They're offered on the pair as a strip of
+thumbnails — tap one to swap it in — and still export with their car.
 
 ## Measured accuracy
 
-Four suites. `npm run test:assign` checks the assignment solver against brute
+Five suites. `npm run test:assign` checks the assignment solver against brute
 force; `npm run test:accuracy` scores eight synthetic workflows; `npm run
-test:real` and `npm run test:samecar` run the whole pipeline over real
-photographs.
+test:real`, `npm run test:samecar` and `npm run test:takes` run the whole
+pipeline over real photographs.
 
 The one that matters most is `test:samecar`, because it is the bug report:
 eight photos of a single Jeep across one job, with ground truth established by
@@ -105,6 +154,7 @@ and that the two centre-console shots with no partner are left alone.
 | Scenario | Grouping P/R | Pairing P/R |
 |---|---|---|
 | One Jeep, one job (real photos) | one car | 3/3 exact |
+| Same Jeep, every angle shot 3× (real photos) | one car | 3/3 exact, sharpest take |
 | Five jobs (real photos) | 100% / 100% | 5/5 exact |
 | 8 cars, clean gaps (64 photos) | 100% / 100% | 100% / 100% |
 | No EXIF, timestamps bunched | 100% / 100% | 100% / 100% |
@@ -151,8 +201,10 @@ angle drifts.
    | `↑` `↓` | Previous / next car |
    | `Ctrl`+`Z` | Undo |
 
-   Anything left unpaired can be matched by tapping one photo then its partner,
-   and still exports with its car.
+   When the same angle was shot more than once, a strip of thumbnails under the
+   photo shows the other takes with the sharpest already picked — tap another to
+   swap it in. Anything left unpaired can be matched by tapping one photo then
+   its partner, and still exports with its car.
 4. **Style** — set the look once, with a live preview. Save named presets.
 5. **Export** — share sheet straight to Instagram or Photos, or a ZIP.
 
@@ -198,9 +250,11 @@ npm test                 # end-to-end: import → group → pair → style → e
 npm run test:assign      # the assignment solver against brute force
 npm run test:real        # the whole pipeline over real detailing photos
 npm run test:samecar     # the bug report: one car, one job, eight real photos
+npm run test:takes       # three shots of one angle — does the sharpest win?
 npm run test:accuracy    # precision/recall across 8 adversarial scenarios
 npm run test:diagnose    # distance distributions on synthetic fixtures
 npm run test:diagnose:real  # …and on real photos. Run before touching a threshold.
+npm run test:diagnose:takes # same-take vs different-angle, on both photo sources
 npm run test:measure     # re-measure reference collages, re-cut their panels
 npm run test:shots       # screenshots and a sample composite into test/output/
 ```
@@ -219,8 +273,8 @@ only.
 ### Layout
 
 ```
-src/lib/hash.ts        fingerprinting — luma grids, chromaticity, dHash, shifted NCC
-src/lib/cluster.ts     car grouping on the clock, pair suggestion
+src/lib/hash.ts        fingerprinting — luma grids, chromaticity, dHash, shot quality
+src/lib/cluster.ts     car grouping on the clock, take collapsing, pair suggestion
 src/lib/assign.ts      optimal one-to-one assignment (Hungarian)
 src/lib/render.ts      the composite renderer
 src/lib/exporter.ts    full-resolution rendering, ZIP and share-sheet packing

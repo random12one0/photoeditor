@@ -124,7 +124,9 @@ export default function App() {
           const { bitmap } = await decodeToProxy(file)
           const proxyUrl = await bitmapToObjectUrl(bitmap)
           bitmap.close()
-          restored.push({ ...meta, file, proxyUrl })
+          /* A session saved before shot quality existed has no score. Neutral
+             rather than zero, so an old session doesn't rank every photo last. */
+          restored.push({ ...meta, quality: meta.quality ?? 0.5, file, proxyUrl })
         }
         if (cancelled) return
 
