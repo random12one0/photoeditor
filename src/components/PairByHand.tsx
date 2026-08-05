@@ -72,6 +72,24 @@ export default function PairByHand({ photos, onPair }: Props) {
 
   if (photos.length === 0) return null
 
+  /* Time order, always. The times are the most useful thing on this screen for
+     telling a before from an after — the photos themselves often aren't — so the
+     grid reads chronologically and marks where the longest pause falls, which is
+     the job itself. Everything left of that line is a before. */
+  const ordered = [...photos].sort((a, b) => a.takenAt - b.takenAt)
+  const splitAt = (() => {
+    let widest = 0
+    let at = -1
+    for (let i = 1; i < ordered.length; i++) {
+      const gap = ordered[i].takenAt - ordered[i - 1].takenAt
+      if (gap > widest) {
+        widest = gap
+        at = i
+      }
+    }
+    return widest > 180_000 ? at : -1
+  })()
+
   const picked = pick ? photos.find((p) => p.id === pick) : null
   const zoomed = zoom ? photos.find((p) => p.id === zoom) : null
 
@@ -117,15 +135,18 @@ export default function PairByHand({ photos, onPair }: Props) {
       </div>
 
       <p className="tiny dim handpair-hint">
+        In time order. {splitAt > 0 ? 'The line marks the longest gap — the job itself, so everything before it is a "before". ' : ''}
         Tapped them the wrong way round? Every finished pair has a swap button.
         Anything you leave alone still exports with this car.
       </p>
 
       <div className="handpair-grid">
-        {photos.map((photo) => (
+        {ordered.map((photo, i) => (
           <div
             key={photo.id}
-            className={`handpair-tile${photo.id === pick ? ' picked' : ''}`}
+            className={`handpair-tile${photo.id === pick ? ' picked' : ''}${
+              i === splitAt ? ' after-gap' : ''
+            }`}
           >
             <button
               className="handpair-pick"

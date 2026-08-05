@@ -1764,3 +1764,42 @@ input[type='range']::-moz-range-thumb {
   color: var(--text);
   border-color: var(--line-strong);
 }
+
+/* An inline "actually, no" inside a caption. Text-sized on purpose: it should
+   be findable when the grouping is wrong and invisible when it isn't. */
+.linkish {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.linkish:hover {
+  color: var(--text);
+}
+
+/* Where the job falls in a time-ordered grid of leftovers. Everything before
+   this line is a "before" shot — which is usually easier to see from the clock
+   than from the photographs. */
+.handpair-tile.after-gap {
+  position: relative;
+}
+.handpair-tile.after-gap::before {
+  content: 'after the job';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -14px;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  border-top: 1px dashed var(--line-strong);
+  padding-top: 2px;
+}
+.handpair-grid {
+  row-gap: var(--s5);
+}

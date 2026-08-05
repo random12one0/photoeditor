@@ -46,12 +46,14 @@ function TakeStrip({
   chosen,
   photoMap,
   onPick,
+  onSplit,
 }: {
   side: 'before' | 'after'
   pair: Pair
   chosen: Photo
   photoMap: Map<string, Photo>
   onPick: (pairId: string, side: 'before' | 'after', photoId: string) => void
+  onSplit: () => void
 }) {
   const alternates = (side === 'before' ? pair.beforeAlternates : pair.afterAlternates) ?? []
   const takes = [chosen.id, ...alternates]
@@ -64,7 +66,12 @@ function TakeStrip({
 
   return (
     <div className="take-strip" data-testid={`takes-${side}`}>
-      <span className="tiny dim">{takes.length} shots — sharpest picked</span>
+      <span className="tiny dim">
+        {takes.length} shots — sharpest picked{' '}
+        <button className="linkish" onClick={onSplit} data-testid="split-takes">
+          not the same shot?
+        </button>
+      </span>
       <div className="take-row">
         {takes.map((take) => (
           <button
@@ -156,6 +163,25 @@ export default function PairView({
        disorienting one, because this card is finished either way. */
     onResuggest(group.id)
   }, [group, current, onUpdateGroup, onResuggest])
+
+  /**
+   * Stop grouping near-identical shots in this car, and match it again.
+   *
+   * Grouping assumes that shots which look alike *are* alike. A car
+   * photographed entirely in close-ups breaks that: four shots of four
+   * different black trim spots are four dark, similarly-framed rectangles, and
+   * no threshold tells them apart. Rather than guess a number that works for
+   * both kinds of car, this is the switch for the car that needs it — reported
+   * as four distinct photos merged into one, on a car of twenty-nine that
+   * produced a single pair.
+   */
+  const splitTakes = useCallback(() => {
+    if (!group) return
+    haptic(8)
+    onUpdateGroup(group.id, (g) => ({ ...g, collapseTakes: false }), 'treat shots separately')
+    onResuggest(group.id)
+    notify('Every shot in this car is now matched on its own', true)
+  }, [group, onUpdateGroup, onResuggest, notify])
 
   /**
    * Swap one side of the pair for the next-best candidate, keeping the other.
@@ -602,6 +628,7 @@ export default function PairView({
                       chosen={before}
                       photoMap={photoMap}
                       onPick={chooseTake}
+                      onSplit={splitTakes}
                     />
                   </figure>
                   <figure>
@@ -624,6 +651,7 @@ export default function PairView({
                       chosen={after}
                       photoMap={photoMap}
                       onPick={chooseTake}
+                      onSplit={splitTakes}
                     />
                   </figure>
                 </div>

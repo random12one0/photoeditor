@@ -50,6 +50,16 @@ export interface Group {
    * them for everything else, and the whole car is re-solved around it.
    */
   rejected?: string[]
+  /**
+   * Whether near-identical shots in this car may be collapsed into one
+   * candidate. Undefined means yes.
+   *
+   * A per-car switch rather than a threshold, because a car photographed
+   * entirely in close-ups breaks the assumption the threshold rests on: four
+   * shots of four different black trim spots look like one shot taken four
+   * times, and no number separates them.
+   */
+  collapseTakes?: boolean
 }
 
 export interface Pair {

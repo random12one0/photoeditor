@@ -154,7 +154,27 @@ function splitBeforeAfter(photos: Photo[]): { before: Photo[]; after: Photo[] } 
  * to — it *is* the same framing. It never reaches this comparison, because
  * befores are only ever grouped against befores and afters against afters.
  */
-const SAME_TAKE_SCORE = 0.68
+const SAME_TAKE_SCORE = 0.80
+
+/*
+ * Raised from 0.68 after a car of close-ups came back with four genuinely
+ * different shots merged into one.
+ *
+ * The measurement that set 0.68 was taken on whole-car and mid-range frames,
+ * where a different angle really does look different. It does not hold for
+ * close-ups: four shots of four different black trim spots are four dark,
+ * low-contrast, similarly-framed rectangles, and they score like one shot taken
+ * four times. The old threshold sat in a gap that those photos simply are not in.
+ *
+ * The two errors are not equal, which is what decides the direction. Failing to
+ * collapse a real burst costs an extra suggestion to reject. Collapsing four
+ * distinct photos hides three of them behind a thumbnail strip and quietly
+ * removes them from matching altogether — which is how a car of twenty-nine
+ * photos produced one pair. So this now errs firmly towards leaving photos
+ * alone, and 0.80 is above the 0.737 floor the earlier measurement found for
+ * genuine re-shoots, meaning some real bursts will no longer collapse. That is
+ * the intended trade.
+ */
 
 /**
  * Two takes of one angle come seconds apart.
@@ -171,7 +191,14 @@ const SAME_TAKE_SCORE = 0.68
  * angles are two minutes apart and are excluded on time alone, whatever they
  * score. Both gates must pass.
  */
-const SAME_TAKE_WINDOW_MS = 90_000
+const SAME_TAKE_WINDOW_MS = 45_000
+
+/*
+ * Also tightened, for the same reason and on the same argument. Three shots of
+ * one angle are taken in one motion — seconds, not a minute — while moving to
+ * the next detail on the same panel takes longer. Forty-five seconds is well
+ * inside the reported "maybe within a minute".
+ */
 
 /**
  * Collapse runs of near-identical shots into one candidate each.
@@ -220,6 +247,14 @@ export interface PairingConstraints {
   forbidden?: ReadonlySet<string>
   /** Photos already settled in a confirmed pair, so not up for assignment. */
   taken?: ReadonlySet<string>
+  /**
+   * Whether near-identical shots may be collapsed into one candidate.
+   *
+   * Off for a car whose photos are all close-ups of different small areas,
+   * where "these look the same" and "these are the same" come apart. No
+   * threshold survives that case, so it is a switch rather than a number.
+   */
+  collapseTakes?: boolean
 }
 
 /**
@@ -257,8 +292,10 @@ export function findPairs(
   /* Whole takes drop out once any of their shots is spoken for: the group
      exists to offer one candidate per angle, and an angle whose pick is already
      confirmed has nothing left to offer. */
-  const beforeTakes = groupSameTake(split.before).filter((t) => !t.some((p) => taken.has(p.id)))
-  const afterTakes = groupSameTake(split.after).filter((t) => !t.some((p) => taken.has(p.id)))
+  const collapse = constraints.collapseTakes !== false
+  const asTakes = (batch: Photo[]) => (collapse ? groupSameTake(batch) : batch.map((p) => [p]))
+  const beforeTakes = asTakes(split.before).filter((t) => !t.some((p) => taken.has(p.id)))
+  const afterTakes = asTakes(split.after).filter((t) => !t.some((p) => taken.has(p.id)))
   const before = beforeTakes.map((t) => t[0])
   const after = afterTakes.map((t) => t[0])
 
@@ -354,7 +391,11 @@ export function resuggestGroup(
   const taken = new Set(confirmed.flatMap((p) => [p.beforeId, p.afterId]))
   const forbidden = new Set(group.rejected ?? [])
 
-  const suggestions = findPairs(photos, settings, { forbidden, taken })
+  const suggestions = findPairs(photos, settings, {
+    forbidden,
+    taken,
+    collapseTakes: group.collapseTakes !== false,
+  })
   return [...confirmed, ...suggestions]
 }
 
