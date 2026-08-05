@@ -635,6 +635,7 @@ export default function App() {
           onUpdateGroup={updateGroup}
           onResuggest={resuggest}
           onRematch={rematchGroup}
+          clusterSettings={clusterSettings}
           onNext={() => setStage('style')}
           notify={notify}
         />

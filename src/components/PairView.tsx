@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { haptic } from '../lib/share'
-import { rejectionKey } from '../lib/cluster'
-import type { Group, Pair, Photo, StylePreset } from '../types'
+import { DEFAULT_CLUSTER_SETTINGS, candidatePartners, rejectionKey } from '../lib/cluster'
+import type { ClusterSettings, Group, Pair, Photo, StylePreset } from '../types'
 import Icon from './Icon'
 import PairByHand from './PairByHand'
 import PairPreview from './PairPreview'
@@ -13,6 +13,8 @@ interface Props {
   onUpdateGroup: (groupId: string, updater: (g: Group) => Group, label?: string) => void
   /** Re-solve one car's suggestions, honouring confirmations and rejections. */
   onResuggest: (groupId: string) => void
+  /** The thresholds candidate lists are filtered by. */
+  clusterSettings: ClusterSettings
   /** Throw away every suggestion and rejection for a car and start it over. */
   onRematch: (groupId: string) => void
   onNext: () => void
@@ -88,6 +90,7 @@ export default function PairView({
   onUpdateGroup,
   onResuggest,
   onRematch,
+  clusterSettings = DEFAULT_CLUSTER_SETTINGS,
   onNext,
   notify,
 }: Props) {
@@ -116,6 +119,25 @@ export default function PairView({
       .filter((p): p is Photo => Boolean(p))
   }, [group, photoMap])
 
+  /**
+   * What is still available to the before shot on the card, beyond what it is
+   * currently showing.
+   *
+   * Computed live rather than read off the pair, because cycling and rejecting
+   * both change it and a stored list goes stale the moment either happens — the
+   * button then promises another candidate when there is none.
+   */
+  const remainingForCurrent = useMemo(() => {
+    if (!group || !current) return []
+    return candidatePartners(
+      group,
+      photoMap,
+      clusterSettings,
+      current.beforeId,
+      'before',
+    ).filter((id) => id !== current.afterId)
+  }, [group, current, photoMap, clusterSettings])
+
   /* ------------------------------------------------------------------ verdicts */
 
   const confirmCurrent = useCallback(() => {
@@ -129,32 +151,94 @@ export default function PairView({
       }),
       'confirm pair',
     )
-  }, [group, current, onUpdateGroup])
+    /* A confirmation locks two photos away, which genuinely changes what is
+       possible for everything else — a good moment to re-solve, and not a
+       disorienting one, because this card is finished either way. */
+    onResuggest(group.id)
+  }, [group, current, onUpdateGroup, onResuggest])
 
   /**
-   * "Not a pair" — record it, then re-solve the whole car around it.
+   * Swap one side of the pair for the next-best candidate, keeping the other.
    *
-   * The first version of this walked one before shot down a private list of
-   * runners-up and told nothing else about the car, which made the screen a dead
-   * end: a wheel with no after in the set could burn through every remaining
-   * photo in turn, and each one it burned was gone rather than offered to the
-   * before shot that actually wanted it. Ten photos could finish unsorted
-   * because of one unpartnerable wheel.
+   * The whole point is that only one photo changes. An earlier version re-solved
+   * the entire car after every rejection, which is right for the matching and
+   * wrong for the person: the before shot changed underneath them too, so the
+   * screen looked like it was dealing out random combinations rather than
+   * working through one photo's options. Reported exactly that way.
+   */
+  const cycleSide = useCallback(
+    (side: 'before' | 'after') => {
+      if (!group || !current) return
+      const anchorId = side === 'after' ? current.beforeId : current.afterId
+      const anchorSide = side === 'after' ? 'before' : 'after'
+      const options = candidatePartners(group, photoMap, clusterSettings, anchorId, anchorSide)
+      if (options.length === 0) return false
+
+      const currentId = side === 'after' ? current.afterId : current.beforeId
+      const at = options.indexOf(currentId)
+      const next = options[(at + 1) % options.length]
+      if (next === currentId) return false
+
+      haptic(6)
+      onUpdateGroup(group.id, (g) => ({
+        ...g,
+        pairs: g.pairs.map((p) =>
+          p.id === current.id
+            ? side === 'after'
+              ? { ...p, afterId: next, afterAlternates: undefined }
+              : { ...p, beforeId: next, beforeAlternates: undefined }
+            : p,
+        ),
+      }))
+      return true
+    },
+    [group, current, photoMap, clusterSettings, onUpdateGroup],
+  )
+
+  /**
+   * "Not a pair" — remember it, and show this same before shot its next option.
    *
-   * Rejecting is information about the car, not about the card. Recording it and
-   * re-solving is how that information reaches everything else.
+   * The rejection is recorded on the car, so it is honoured everywhere later: a
+   * photo freed this way becomes available to whichever before shot actually
+   * wants it, the next time the car is re-solved. But the re-solve waits for a
+   * moment that isn't disorienting — a confirmation, or a photo declared
+   * partnerless — rather than happening under the user mid-decision.
    */
   const rejectCurrent = useCallback(() => {
     if (!group || !current) return
     haptic([8, 40, 8])
     const key = rejectionKey(current.beforeId, current.afterId)
+    const beforeId = current.beforeId
+    const rejectedAfter = current.afterId
+
+    /* What is left for this before shot once this one is ruled out. */
+    const remaining = candidatePartners(
+      group,
+      photoMap,
+      clusterSettings,
+      beforeId,
+      'before',
+    ).filter((id) => id !== rejectedAfter)
+
     onUpdateGroup(
       group.id,
-      (g) => ({ ...g, rejected: [...new Set([...(g.rejected ?? []), key])] }),
+      (g) => ({
+        ...g,
+        rejected: [...new Set([...(g.rejected ?? []), key])],
+        pairs: remaining.length
+          ? g.pairs.map((p) =>
+              p.id === current.id
+                ? { ...p, afterId: remaining[0], afterAlternates: undefined }
+                : p,
+            )
+          : g.pairs.filter((p) => p.id !== current.id),
+      }),
       'not a pair',
     )
-    onResuggest(group.id)
-  }, [group, current, onUpdateGroup, onResuggest])
+
+    // Nothing left for this photo: the car can usefully re-solve around it now.
+    if (!remaining.length) onResuggest(group.id)
+  }, [group, current, photoMap, clusterSettings, onUpdateGroup, onResuggest])
 
   /**
    * "Neither" — this before shot has no partner anywhere in this car.
@@ -504,6 +588,14 @@ export default function PairView({
                       <span>BEFORE</span>
                       <span className="mono dim">{clockOf(before.takenAt)}</span>
                     </figcaption>
+                    <button
+                      className="side-cycle"
+                      data-testid="cycle-before"
+                      onClick={() => cycleSide('before')}
+                    >
+                      <Icon name="swap" size={14} />
+                      Different before
+                    </button>
                     <TakeStrip
                       side="before"
                       pair={current}
@@ -518,6 +610,14 @@ export default function PairView({
                       <span>AFTER</span>
                       <span className="mono dim">{clockOf(after.takenAt)}</span>
                     </figcaption>
+                    <button
+                      className="side-cycle"
+                      data-testid="cycle-after"
+                      onClick={() => cycleSide('after')}
+                    >
+                      <Icon name="swap" size={14} />
+                      Different after
+                    </button>
                     <TakeStrip
                       side="after"
                       pair={current}
@@ -669,7 +769,7 @@ export default function PairView({
                 wrong is what made rejecting feel like a dead end. */}
             <button className="verdict no" data-testid="reject" onClick={rejectCurrent}>
               <Icon name="close" size={20} />
-              {current.runnersUp?.length ? 'Try another' : 'Not a pair'}
+              {remainingForCurrent.length ? 'Try another' : 'Not a pair'}
             </button>
             <button
               className="verdict-sm"

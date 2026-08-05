@@ -72,9 +72,10 @@ const shown = () =>
     if (!figs.length) return null
     return {
       pct: document.querySelector('.match .mono')?.textContent,
-      /* The whole combination. Re-solving reorders the queue, so consecutive
-         cards are often different before shots — what must never repeat is a
-         pairing the user has already rejected. */
+      before: figs[0]?.querySelector('img')?.getAttribute('src') ?? '?',
+      after: figs[1]?.querySelector('img')?.getAttribute('src') ?? '?',
+      /* The whole combination. What must never repeat is a pairing the user has
+         already rejected. */
       combo:
         (figs[0]?.querySelector('img')?.getAttribute('src') ?? '?') +
         ' + ' +
@@ -96,16 +97,25 @@ check(
 const seenPct = [first.pct]
 const seenCombos = [first.combo]
 let steps = 0
+let beforeChanged = 0
 while (steps < 8) {
-  const before = await shown()
-  if (!before || before.rejectLabel !== 'Try another') break
+  const was = await shown()
+  if (!was || was.rejectLabel !== 'Try another') break
   await page.click('[data-testid=reject]')
   await page.waitForTimeout(180)
-  const after = await shown()
-  if (!after) break
+  const now = await shown()
+  if (!now) break
   steps++
-  seenPct.push(after.pct)
-  seenCombos.push(after.combo)
+  seenPct.push(now.pct)
+  seenCombos.push(now.combo)
+  /* The reported regression: both photos changing at once, so it read as random
+     combinations rather than one photo's options being worked through.
+     Moving on *is* right once a photo has run out of candidates — the label
+     says so — which is why only a change while it still had options counts. */
+  if (now.before !== was.before && was.rejectLabel === 'Try another' && steps < 8) {
+    const stillHadOptions = was.rejectLabel === 'Try another'
+    if (stillHadOptions) beforeChanged++
+  }
 }
 console.log(`  walked ${steps} candidate(s): ${seenPct.join(' → ')}`)
 check('rejecting produced a different candidate', steps >= 1)
@@ -115,9 +125,42 @@ check(
   `${seenCombos.length} cards, ${new Set(seenCombos).size} distinct combinations`,
 )
 check(
+  'the before shot stayed put while the afters cycled',
+  beforeChanged === 0,
+  beforeChanged === 0 ? 'held throughout' : `it changed ${beforeChanged} time(s)`,
+)
+check(
   'the card is still up — the photo was not abandoned',
   (await page.locator('[data-testid=review-images]').count()) === 1,
 )
+
+console.log('\n[1b] Each side can be cycled on its own')
+const start = await shown()
+/* Only meaningful while there is something to cycle to. Once a before shot has
+   run out — which the label says — the button correctly does nothing. */
+if (start?.rejectLabel === 'Try another') {
+  await page.click('[data-testid=cycle-after]')
+  await page.waitForTimeout(180)
+  const afterCycled = await shown()
+  check(
+    '"Different after" changes only the after',
+    afterCycled.before === start.before && afterCycled.after !== start.after,
+    afterCycled.before === start.before ? 'before held' : 'the before moved too',
+  )
+} else {
+  check('"Different after" — skipped, this photo has no alternatives left', true)
+}
+const beforeStart = await shown()
+await page.click('[data-testid=cycle-before]')
+await page.waitForTimeout(180)
+const beforeCycled = await shown()
+if (beforeCycled && beforeStart) {
+  check(
+    '"Different before" changes only the before',
+    beforeCycled.after === beforeStart.after && beforeCycled.before !== beforeStart.before,
+    beforeCycled.after === beforeStart.after ? 'after held' : 'the after moved too',
+  )
+}
 
 console.log('\n[2] When the candidates run out, the label says so')
 let guard = 0

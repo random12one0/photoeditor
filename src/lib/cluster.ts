@@ -358,6 +358,59 @@ export function resuggestGroup(
   return [...confirmed, ...suggestions]
 }
 
+/**
+ * Every photo on the opposite side that could partner this one, best first.
+ *
+ * Exists so the review screen can offer a predictable "show me the next
+ * candidate" rather than re-solving the whole car and handing back a different
+ * question. Re-solving is right when a constraint really changes — a
+ * confirmation, or a photo declared partnerless — but doing it on every
+ * rejection means the before shot changes underneath the person looking at it,
+ * which reads as the app shuffling at random. It was reported exactly that way.
+ *
+ * Ranked by how alike the two photos look, with anything already confirmed
+ * elsewhere, already rejected, or below the quality floor left out.
+ */
+export function candidatePartners(
+  group: Group,
+  photoMap: Map<string, Photo>,
+  settings: ClusterSettings,
+  photoId: string,
+  side: 'before' | 'after',
+): string[] {
+  const photos = group.photoIds
+    .map((id) => photoMap.get(id))
+    .filter((p): p is Photo => Boolean(p))
+    .sort((a, b) => a.takenAt - b.takenAt)
+
+  const split = splitBeforeAfter(photos)
+  if (!split) return []
+
+  const subject = photoMap.get(photoId)
+  if (!subject) return []
+
+  /* Partners come from the other pass. Asking for the partners of a before shot
+     means the after batch, and the other way round. */
+  const pool = side === 'before' ? split.after : split.before
+
+  const rejected = new Set(group.rejected ?? [])
+  const claimed = new Set(
+    group.pairs.filter((p) => p.confirmed).flatMap((p) => [p.beforeId, p.afterId]),
+  )
+
+  return pool
+    .filter((p) => p.id !== photoId && !claimed.has(p.id))
+    .filter((p) => {
+      const key =
+        side === 'before' ? rejectionKey(photoId, p.id) : rejectionKey(p.id, photoId)
+      return !rejected.has(key)
+    })
+    .map((p) => ({ id: p.id, score: similarity(subject, p) }))
+    .filter((c) => c.score >= settings.minPairScore)
+    .sort((a, b) => b.score - a.score)
+    .map((c) => c.id)
+}
+
 function labelFor(photos: Photo[], index: number): string {
   const d = new Date(photos[0].takenAt)
   const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })

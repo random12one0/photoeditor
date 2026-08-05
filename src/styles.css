@@ -1740,3 +1740,27 @@ input[type='range']::-moz-range-thumb {
   margin: var(--s3) 0 0;
   font-size: 0.66rem;
 }
+
+/* One per side of the review card. The point of these is that only one photo
+   changes: hold the before still and walk the afters, or the other way round. */
+.side-cycle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.side-cycle:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
