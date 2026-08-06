@@ -15,9 +15,12 @@ import type { ClusterSettings, Group, Photo, SavedPreset, StylePreset } from '..
  * empty as though a day's work had never happened. The name on the screen is
  * cosmetic; this is not. */
 const DB_NAME = 'unbklok'
-const DB_VERSION = 1
+/* Bumped to 2 to add the label store. */
+const DB_VERSION = 2
 const STORE_FILES = 'files'
 const STORE_META = 'meta'
+/** Judgements about pairs. Written by lib/labels.ts; declared here. See below. */
+export const STORE_LABELS = 'labels'
 
 /** Everything about a Photo except the things we can rebuild or re-derive. */
 type StoredPhoto = Omit<Photo, 'file' | 'proxyUrl'>
@@ -47,18 +50,39 @@ interface StoredSession {
   schema?: number
 }
 
-function open(): Promise<IDBDatabase> {
+/**
+ * The one place the database is opened, and the one place its schema is
+ * declared.
+ *
+ * This is not tidiness. IndexedDB versions the whole database, not a store, so
+ * a second module opening the same name at its own version is a bug that does
+ * not look like one: whichever call arrives with the lower number fails, and
+ * everything downstream of it degrades quietly. When the label store was first
+ * added with its own `open()` at version 2, session restore — asking for
+ * version 1 — began throwing, was caught, and returned "no saved session". The
+ * app came up empty as though the day's work had never happened, with no error
+ * anywhere the user could see.
+ *
+ * So every store this app has is created here, including ones this file never
+ * touches, and every module goes through this function.
+ */
+export function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains(STORE_FILES)) db.createObjectStore(STORE_FILES)
       if (!db.objectStoreNames.contains(STORE_META)) db.createObjectStore(STORE_META)
+      if (!db.objectStoreNames.contains(STORE_LABELS)) {
+        db.createObjectStore(STORE_LABELS, { keyPath: 'key' })
+      }
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
   })
 }
+
+const open = openDb
 
 function tx<T>(
   db: IDBDatabase,

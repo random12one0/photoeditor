@@ -31,6 +31,9 @@ export type IconName =
   | 'clock'
   | 'copy'
   | 'sparkle'
+  | 'flask'
+  | 'thumbUp'
+  | 'thumbDown'
 
 const PATHS: Record<IconName, JSX.Element> = {
   upload: (
@@ -154,6 +157,25 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <path d="M12 4.5 13.6 9l4.4 1.6-4.4 1.6L12 16.7l-1.6-4.5L6 10.6 10.4 9 12 4.5Z" />
       <path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z" />
+    </>
+  ),
+  flask: (
+    <>
+      <path d="M9.5 3.5h5" />
+      <path d="M10.5 3.5v6L5.8 17.4A2 2 0 0 0 7.5 20.5h9a2 2 0 0 0 1.7-3.1L13.5 9.5v-6" />
+      <path d="M8.2 14.5h7.6" />
+    </>
+  ),
+  thumbUp: (
+    <>
+      <path d="M7 10.5v9H4.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7Z" />
+      <path d="M7 10.5 11 3.5a2 2 0 0 1 2 2v4h5.2a1.8 1.8 0 0 1 1.75 2.2l-1.4 6A1.8 1.8 0 0 1 16.8 19.5H7" />
+    </>
+  ),
+  thumbDown: (
+    <>
+      <path d="M7 13.5v-9H4.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1H7Z" />
+      <path d="M7 13.5 11 20.5a2 2 0 0 0 2-2v-4h5.2a1.8 1.8 0 0 0 1.75-2.2l-1.4-6A1.8 1.8 0 0 0 16.8 4.5H7" />
     </>
   ),
 }

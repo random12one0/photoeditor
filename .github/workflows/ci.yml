@@ -48,6 +48,12 @@ jobs:
       - name: Stale session upgrade
         run: npm run test:stale
 
+      # Judgements are recorded as a side effect of pairing, and the export that
+      # carries them is asserted to contain measurements and no image data.
+      # Generates its own photos, so it runs here.
+      - name: Labelling and export
+        run: npm run test:lab
+
       # Grouping and pairing precision/recall across eight adversarial scenarios.
       # The real-photo suite is not run here: its fixtures are photographs of
       # real cars with visible plates and are deliberately not in the repo.

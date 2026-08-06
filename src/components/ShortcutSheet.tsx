@@ -10,6 +10,7 @@ const SHORTCUTS: { keys: string[]; action: string }[] = [
   { keys: ['P'], action: 'Toggle finished preview' },
   { keys: ['↑', '↓'], action: 'Previous / next car' },
   { keys: ['Ctrl', 'Z'], action: 'Undo' },
+  { keys: ['Y', 'X'], action: 'In the Lab: same shot / not a pair' },
   { keys: ['?'], action: 'This list' },
 ]
 

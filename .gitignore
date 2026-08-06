@@ -10,5 +10,6 @@ test/output/
 test/fixtures/reference/
 test/fixtures/photos/
 test/fixtures/samecar/
+test/fixtures/collages/
 tsconfig.tsbuildinfo
 dist-single/

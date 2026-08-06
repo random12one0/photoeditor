@@ -3,6 +3,7 @@ import ExportView from './components/ExportView'
 import GroupsView from './components/GroupsView'
 import Icon from './components/Icon'
 import ImportView from './components/ImportView'
+import LabView from './components/LabView'
 import PairView from './components/PairView'
 import ShortcutSheet from './components/ShortcutSheet'
 import StyleView from './components/StyleView'
@@ -37,9 +38,21 @@ import type {
   StylePreset,
 } from './types'
 
-export type Stage = 'import' | 'cars' | 'pairs' | 'style' | 'export'
+/**
+ * 'lab' is deliberately absent from the stepper below.
+ *
+ * The stepper is a description of the job — import, group, pair, style, export —
+ * and every step in it is one everybody has to do. The lab is a side room: it
+ * measures the matcher rather than producing anything, and putting it in the
+ * line would imply it was part of the work. It has its own button in the header.
+ */
+export type Stage = 'import' | 'cars' | 'pairs' | 'style' | 'export' | 'lab'
 
-const STAGES: { id: Stage; label: string; icon: Parameters<typeof Icon>[0]['name'] }[] = [
+const STAGES: {
+  id: Exclude<Stage, 'lab'>
+  label: string
+  icon: Parameters<typeof Icon>[0]['name']
+}[] = [
   { id: 'import', label: 'Import', icon: 'upload' },
   { id: 'cars', label: 'Cars', icon: 'cars' },
   { id: 'pairs', label: 'Pairs', icon: 'pair' },
@@ -519,7 +532,7 @@ export default function App() {
     )
   }
 
-  const stageDone: Record<Stage, boolean> = {
+  const stageDone: Record<Exclude<Stage, 'lab'>, boolean> = {
     import: photos.length > 0,
     cars: groups.length > 0,
     pairs: pairCount > 0 && confirmedCount === pairCount,
@@ -569,6 +582,15 @@ export default function App() {
             aria-label="Undo"
           >
             <Icon name="undo" />
+          </button>
+          <button
+            className={`icon-btn${stage === 'lab' ? ' active' : ''}`}
+            onClick={() => setStage((s) => (s === 'lab' ? 'cars' : 'lab'))}
+            title="Lab — judge pairs and measure the matcher"
+            aria-label="Lab"
+            data-testid="lab-open"
+          >
+            <Icon name="flask" />
           </button>
           <button
             className="icon-btn"
@@ -651,6 +673,14 @@ export default function App() {
           onApplyPreset={applyPreset}
           onDeletePreset={deletePreset}
           onNext={() => setStage('export')}
+          notify={notify}
+        />
+      )}
+      {stage === 'lab' && (
+        <LabView
+          groups={groups}
+          photoMap={photoMap}
+          clusterSettings={clusterSettings}
           notify={notify}
         />
       )}

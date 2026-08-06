@@ -1,7 +1,7 @@
 {
   "name": "before-after",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,7 @@
     "test:accuracy": "node test/stress.mjs",
     "test:diagnose": "node test/diagnose.mjs",
     "test:shots": "node test/shots.mjs",
-    "test:all": "node test/assign.test.mjs && node test/readahead.test.mjs && node test/decode.test.mjs && node test/e2e.mjs && node test/stress.mjs && node test/real-photos.mjs && node test/samecar.mjs && node test/takes.mjs && node test/handpair.mjs && node test/runnerup.mjs && node test/stale-session.mjs",
+    "test:all": "node test/assign.test.mjs && node test/readahead.test.mjs && node test/decode.test.mjs && node test/e2e.mjs && node test/stress.mjs && node test/real-photos.mjs && node test/samecar.mjs && node test/collages.mjs && node test/takes.mjs && node test/handpair.mjs && node test/runnerup.mjs && node test/lab.mjs && node test/stale-session.mjs",
     "test:real": "node test/real-photos.mjs",
     "test:diagnose:real": "node test/diagnose-real.mjs",
     "test:measure": "node test/measure.mjs",
@@ -28,7 +28,12 @@
     "test:runnerup": "node test/runnerup.mjs",
     "test:diagnose:descriptors": "node test/diagnose-descriptors.mjs",
     "test:stale": "node test/stale-session.mjs",
-    "test:diagnose:features": "node test/diagnose-features.mjs"
+    "test:diagnose:features": "node test/diagnose-features.mjs",
+    "test:collages": "node test/collages.mjs",
+    "test:lab": "node test/lab.mjs",
+    "test:diagnose:weights": "node test/diagnose-weights.mjs",
+    "split:collages": "node scripts/split-collages.mjs",
+    "fit:labels": "node scripts/fit-from-labels.mjs"
   },
   "dependencies": {
     "exifr": "^7.1.3",

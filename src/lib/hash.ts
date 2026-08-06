@@ -590,36 +590,54 @@ export const COARSE_GRID = 8
 /**
  * Combined visual similarity, 0-1. "Is this the same shot, before and after?"
  *
- * The weights are measured, not argued — `npm run test:diagnose:descriptors`
- * scores candidates against both sets of real photographs and prints the table
- * this came from. The measure that matters there is *row wins*: for each before
- * shot, does its true partner beat every impostor? A global assignment can
- * rescue a row that loses, which is exactly how a weak descriptor stays hidden
- * until the day it doesn't.
+ * The weights are measured, not argued — `npm run test:diagnose:weights` dumps
+ * every pairwise component score across every set of real photographs available
+ * and searches the weight simplex. The measure is *row wins*: for each photo,
+ * does its true partner beat every impostor? A global assignment can rescue a
+ * row that loses, which is exactly how a weak weighting stays hidden until the
+ * day the rescue is unavailable.
  *
- * This weighting is the only one tried that wins every row on both sets, with
- * the true pair ahead of the best impostor everywhere rather than merely ahead
- * on aggregate.
+ * ## How these numbers were chosen, which matters more than the numbers
  *
- * What changed, and why, because it is not what anyone would guess:
+ * Three sets of real photographs give nineteen rows. Five weights cannot be
+ * pinned down by nineteen rows: of forty thousand weightings searched, nine
+ * thousand win every one. Picking the highest-scoring of those is fitting to
+ * noise, and it measurably is — leave-one-set-out says so. Fit the best possible
+ * weighting on two sets and it drops to 8/10, 4/5 and 3/4 on the third. Every
+ * fold. The peak of the plateau is a different peak for every sample.
  *
- * **The luma grids are gone.** Cross-correlating a contrast-normalised grid was
- * the backbone of this function and it is the weakest signal on real photos —
- * on its own it wins 2 of 4 rows on one set and 3 of 5 on the other, and it was
- * what married a wheel to a car boot. It assumes a before and an after are the
- * same framing, and they are not. It stays in `sameTakeScore`, where the two
- * frames genuinely are seconds apart and that assumption holds.
+ * So these are not the best weights. They are the **centroid of every weighting
+ * that wins every row** — the middle of the region that works rather than its
+ * highest point. Run through the same leave-one-set-out, that procedure scores
+ * 10/10, 5/5 and 4/4 on the held-out set it was not allowed to see. Being in
+ * the middle is the property that generalises; being highest is not.
  *
- * **Colour is counted by presence, not by average.** See `colorHistogram`.
+ * ## What that says about the terms
  *
- * **Edge texture carries nearly as much.** It is the term that actually broke
- * the reported wheel-to-boot confusion: measured on those two frames, every
- * other term preferred the boot, and edges preferred the wheel by 0.06. A tyre
- * is dense tread and radial spokes; a boot is flat carpet.
+ * **The luma grids are back, and `fine` is now the largest single term.** The
+ * previous version of this comment argued at length that they were the weakest
+ * signal on real photographs and had been removed. That was measured, and it
+ * was true *of the grid used alone* on the two sets available then. It does not
+ * follow that the term is useless in a blend, and it isn't: across the winning
+ * region `fine` is used by 93% of weightings at a mean weight of 0.27, the
+ * highest of any term. Structure is largely decorrelated from colour, and a
+ * blend is paid in decorrelation, not in individual strength.
  *
- * **dHash stays, at a low weight.** It is a coarse whole-frame signature that
- * costs nothing, and adding it is what lifted the reference set from 4 of 5 rows
- * to 5 of 5.
+ * **Colour is counted by presence, not by average.** See `colorHistogram`. Its
+ * weight has come down from 0.48 to 0.16, and the reason is the failure that
+ * prompted the retune: a red Kia's rear bench preferred that same Kia's *wheel*
+ * to its own after shot, because both frames are mostly red door and dark trim
+ * and the histogram cannot see that one is a seat. Colour answers "same car"
+ * far better than it answers "same shot", and it was being asked the wrong one.
+ *
+ * **Chromaticity earns a place beside it** at 0.18, used by 96% of winning
+ * weightings — exposure-invariant where the histogram is not.
+ *
+ * **Edge texture holds at 0.17.** It is what originally broke the wheel-to-boot
+ * confusion: a tyre is dense tread and radial spokes, a boot is flat carpet.
+ *
+ * **dHash holds at 0.17**, the most-used term of all at 94%. A coarse
+ * whole-frame signature that costs nothing.
  *
  * The honest ceiling is unchanged: true pairs land around 0.5-0.8 and unrelated
  * shots reach 0.5, so this ranks well but cannot be a hard gate. Suggestions are
@@ -627,21 +645,23 @@ export const COARSE_GRID = 8
  */
 export function similarity(a: Fingerprint, b: Fingerprint): number {
   const hash = 1 - hamming(a.dhash, b.dhash) / 64
+  const coarse = (shiftedNcc(a.lumaGridCoarse, b.lumaGridCoarse, COARSE_GRID, 2) + 1) / 2
+  const fine = (shiftedNcc(a.lumaGrid, b.lumaGrid, LUMA_GRID, 3) + 1) / 2
+  const chroma = 1 - chromaDistance(a.chromaSig, b.chromaSig)
 
-  /* Sessions saved before these descriptors existed have no histograms, and
-     re-deriving them would mean decoding every photo again on restore. The old
-     weighting was worse but it was not broken, so an old session keeps working
-     rather than refusing to open. */
+  /* Sessions saved before the histograms existed have none, and re-deriving
+     them would mean decoding every photo again on restore. The remaining terms
+     are renormalised rather than the whole blend abandoned, so an old session
+     degrades instead of refusing to open. */
   if (!a.colorHist || !b.colorHist || !a.edgeHist || !b.edgeHist) {
-    const coarse = (shiftedNcc(a.lumaGridCoarse, b.lumaGridCoarse, COARSE_GRID, 2) + 1) / 2
-    const fine = (shiftedNcc(a.lumaGrid, b.lumaGrid, LUMA_GRID, 3) + 1) / 2
-    const chroma = 1 - chromaDistance(a.chromaSig, b.chromaSig)
-    return coarse * 0.4 + fine * 0.25 + chroma * 0.25 + hash * 0.1
+    return (coarse * 0.05 + fine * 0.27 + chroma * 0.18 + hash * 0.17) / 0.67
   }
 
   const color = colorHistogramSimilarity(a.colorHist, b.colorHist)
   const edge = edgeHistogramSimilarity(a.edgeHist, b.edgeHist)
-  return color * 0.48 + edge * 0.4 + hash * 0.12
+  return (
+    color * 0.16 + edge * 0.17 + hash * 0.17 + coarse * 0.05 + fine * 0.27 + chroma * 0.18
+  )
 }
 
 /**

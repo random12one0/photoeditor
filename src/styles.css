@@ -1803,3 +1803,190 @@ input[type='range']::-moz-range-thumb {
 .handpair-grid {
   row-gap: var(--s5);
 }
+
+/* ── Lab ────────────────────────────────────────────────────────────────
+   The measurement room. Visually quieter than the working screens on
+   purpose: nothing here produces a photo, so nothing here should compete
+   with the screens that do. */
+
+.lab-head p {
+  max-width: 62ch;
+  margin-top: var(--s2);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.lab-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s2);
+  margin: var(--s4) 0;
+}
+.lab-stats .stat {
+  display: grid;
+  gap: 2px;
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.stat-num {
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+.stat-label {
+  font-size: 0.7rem;
+  color: var(--text-3);
+}
+
+.lab-tabs {
+  display: flex;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+}
+.lab-tabs .btn.active {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.lab-context {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin-bottom: var(--s2);
+}
+
+/* Both shots at the same width, stacked on a phone and side by side once
+   there is room — the same arrangement as the composite they would make,
+   so the comparison is the one the user is actually judging. */
+.lab-pair {
+  display: grid;
+  gap: var(--s2);
+}
+@media (min-width: 720px) {
+  .lab-pair {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.lab-shot {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface);
+}
+.lab-shot img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--surface-2);
+}
+.lab-shot figcaption {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+}
+.lab-shot .name {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lab-actions {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+.lab-btn {
+  flex: 1;
+  min-height: 56px;
+}
+.lab-actions kbd {
+  margin-left: auto;
+  opacity: 0.55;
+}
+.lab-hint {
+  margin-top: var(--s3);
+  max-width: 58ch;
+}
+
+.lab-export {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin-bottom: var(--s3);
+}
+
+.lab-disagree {
+  margin: var(--s5) 0;
+  padding: var(--s3);
+  border: 1px solid color-mix(in srgb, var(--no) 30%, var(--line));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--no-dim) 45%, transparent);
+}
+.lab-disagree h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1);
+  font-size: 0.9rem;
+}
+
+.lab-log {
+  display: grid;
+  gap: var(--s1);
+  margin-top: var(--s4);
+}
+.label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.label-row img {
+  width: 44px;
+  height: 33px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.label-row .names {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.label-row .source {
+  min-width: 52px;
+  text-align: right;
+}
+.verdict {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-full);
+  flex: none;
+}
+.verdict.yes {
+  background: var(--yes-dim);
+  color: var(--yes);
+}
+.verdict.no {
+  background: var(--no-dim);
+  color: var(--no);
+}
+
+.icon-btn.active {
+  background: var(--surface-3);
+  color: var(--text);
+}

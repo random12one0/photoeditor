@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { haptic } from '../lib/share'
 import { DEFAULT_CLUSTER_SETTINGS, candidatePartners, rejectionKey } from '../lib/cluster'
+import { type LabelSource, type Verdict, recordLabel } from '../lib/labels'
 import type { ClusterSettings, Group, Pair, Photo, StylePreset } from '../types'
 import Icon from './Icon'
 import PairByHand from './PairByHand'
@@ -109,6 +110,28 @@ export default function PairView({
   const dragStart = useRef<{ x: number; y: number } | null>(null)
   const dragging = useRef(false)
 
+  /**
+   * Write a judgement down as a side effect of making it.
+   *
+   * Every verdict on this screen is a labelled example, and labelled examples
+   * are the scarce thing — the weights currently rest on nineteen rows of
+   * photographs, which is nowhere near enough to pin down six of them. Nobody
+   * is going to sit and label a training set, but everybody confirms and
+   * rejects pairs all day. So the work is recorded rather than requested.
+   *
+   * Deliberately not awaited and deliberately silent on failure: pairing must
+   * never wait on, or be interrupted by, bookkeeping. See lib/labels.ts for
+   * what is stored, which is measurements and never image data.
+   */
+  const label = useCallback(
+    (beforeId: string, afterId: string, verdict: Verdict, source: LabelSource) => {
+      const before = photoMap.get(beforeId)
+      const after = photoMap.get(afterId)
+      if (before && after) void recordLabel(before, after, verdict, source)
+    },
+    [photoMap],
+  )
+
   const group = groups[Math.min(groupIndex, groups.length - 1)]
   const queue = useMemo(() => (group ? group.pairs.filter((p) => !p.confirmed) : []), [group])
   const current = queue[0]
@@ -150,6 +173,7 @@ export default function PairView({
   const confirmCurrent = useCallback(() => {
     if (!group || !current) return
     haptic(10)
+    label(current.beforeId, current.afterId, 'yes', 'confirm')
     onUpdateGroup(
       group.id,
       (g) => ({
@@ -233,6 +257,7 @@ export default function PairView({
   const rejectCurrent = useCallback(() => {
     if (!group || !current) return
     haptic([8, 40, 8])
+    label(current.beforeId, current.afterId, 'no', 'reject')
     const key = rejectionKey(current.beforeId, current.afterId)
     const beforeId = current.beforeId
     const rejectedAfter = current.afterId
@@ -381,6 +406,9 @@ export default function PairView({
   const pairByHand = useCallback(
     (beforeId: string, afterId: string) => {
       if (!group) return
+      /* The most informative judgement there is: a combination the matcher did
+         not propose, which the user made anyway. */
+      label(beforeId, afterId, 'yes', 'hand')
       const pair: Pair = {
         id: `manual${Date.now().toString(36)}_${manualCounter++}`,
         beforeId,
