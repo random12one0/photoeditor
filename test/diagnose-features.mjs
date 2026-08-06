@@ -122,9 +122,32 @@ const out = await page.evaluate(
       { name: 'global + features 15%', w: { features: 0.15, global: 0.85 } },
       { name: 'global + features 10%', w: { features: 0.1, global: 0.9 } },
       { name: 'global + features 5%', w: { features: 0.05, global: 0.95 } },
+
+      /* Non-linear. A linear blend lets a weak feature score drag a good global
+         one down, which is the wrong shape: geometric agreement is evidence when
+         it is present and says nothing when it is absent. These only ever add. */
+      { name: 'max(global, features)', fn: (t) => Math.max(t.global, t.features) },
+      {
+        name: 'boost when >=10 points agree',
+        fn: (t) => t.global + (t._inliers >= 10 ? 0.25 : 0),
+      },
+      {
+        name: 'boost when >=15 points agree',
+        fn: (t) => t.global + (t._inliers >= 15 ? 0.3 : 0),
+      },
+      {
+        name: 'boost when >=20 points agree',
+        fn: (t) => t.global + (t._inliers >= 20 ? 0.3 : 0),
+      },
+      {
+        name: 'graded boost by inliers',
+        fn: (t) => t.global + 0.35 * (1 - Math.exp(-Math.max(0, t._inliers - 4) / 10)),
+      },
     ]
 
-    const score = (t, w) => {
+    const score = (t, c) => {
+      if (c.fn) return c.fn(t)
+      const w = c.w
       let s = 0
       let total = 0
       for (const k of Object.keys(w)) {
@@ -211,10 +234,8 @@ const out = await page.evaluate(
       candidates: jeepCache.map((row) => row.map((t) => t._candidates)),
       results: CANDIDATES.map((c) => ({
         name: c.name,
-        jeep: evaluate(jeepBefore, jeepAfter, jeepTruth, c.w, jeepCache),
-        refs: refBefore.length
-          ? evaluate(refBefore, refAfter, refTruth, c.w, refCache)
-          : null,
+        jeep: evaluate(jeepBefore, jeepAfter, jeepTruth, c, jeepCache),
+        refs: refBefore.length ? evaluate(refBefore, refAfter, refTruth, c, refCache) : null,
       })),
     }
   },

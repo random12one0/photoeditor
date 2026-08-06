@@ -71,8 +71,15 @@ const PYRAMID_FACTOR = 1.4
 const DESC_BITS = 256
 const DESC_BYTES = DESC_BITS / 8
 
-/** How many corners to keep per pyramid level. */
-const MAX_KEYPOINTS = 260
+/**
+ * How many corners to keep per pyramid level.
+ *
+ * Four levels at 140 is around 500 descriptors per photo, which keeps a
+ * brute-force match to a quarter of a million comparisons — a few milliseconds.
+ * Going higher measurably improved nothing and multiplies the matching cost by
+ * the square.
+ */
+const MAX_KEYPOINTS = 140
 
 /** Radius of the patch a descriptor is built from. */
 const PATCH_RADIUS = 15

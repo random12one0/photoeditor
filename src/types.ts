@@ -25,6 +25,13 @@ export interface Photo {
   colorHist: number[]
   /** What kind of edges are where. Texture, which colour cannot see. */
   edgeHist: number[]
+  /**
+   * ORB keypoints and descriptors — see src/lib/features.ts.
+   *
+   * Absent on sessions saved before this existed, and on photos where the
+   * detector found nothing worth describing.
+   */
+  features?: { points: Float32Array; descriptors: Uint8Array }
   /** Mean luminance 0-255. A clean car is usually brighter than a dirty one. */
   luma: number
   /**

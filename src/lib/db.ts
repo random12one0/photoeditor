@@ -37,7 +37,7 @@ type StoredPhoto = Omit<Photo, 'file' | 'proxyUrl'>
  * A version means the app can tell that what it loaded predates what it knows,
  * and rebuild rather than quietly behave like the old version.
  */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 interface StoredSession {
   photos: StoredPhoto[]

@@ -17,6 +17,7 @@ import {
   lumaGridFromImageData,
   meanLuma,
 } from '/src/lib/hash.ts'
+import { FEATURE_EDGE, detectAndDescribe } from '/src/lib/features.ts'
 
 function rng(seed) {
   let s = seed >>> 0
@@ -216,6 +217,18 @@ export function makePhoto(spec, cfg = {}) {
     lumaGridCoarse: lumaGridFromImageData(coarseGrid),
     colorHist: colorHistogram(bigGrid),
     edgeHist: edgeHistogram(bigGrid),
+    features: detectAndDescribe(
+      (() => {
+        // The detector needs the scene's real shape, not a square.
+        const g = document.createElement('canvas')
+        const s = Math.min(1, FEATURE_EDGE / Math.max(c.width, c.height))
+        g.width = Math.round(c.width * s)
+        g.height = Math.round(c.height * s)
+        const gctx = g.getContext('2d', { willReadFrequently: true })
+        gctx.drawImage(c, 0, 0, g.width, g.height)
+        return gctx.getImageData(0, 0, g.width, g.height)
+      })(),
+    ),
     luma: meanLuma(colorGrid),
   }
 }

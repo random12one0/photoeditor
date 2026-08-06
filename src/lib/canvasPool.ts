@@ -19,6 +19,9 @@ export type ScratchKey =
   /* The quality grid is two orders of magnitude larger than the hash grids, so
      it gets its own canvas rather than resizing 'grid' up and down per photo. */
   | 'quality'
+  /* The keypoint detector needs the photo's real shape, so this one is not
+     square like the others and gets its own canvas. */
+  | 'features'
   | 'proxy'
   | 'backdrop-small'
   | 'backdrop-blur'

@@ -13,6 +13,7 @@ import {
   meanLuma,
   qualityFromImageData,
 } from './hash'
+import { FEATURE_EDGE, detectAndDescribe } from './features'
 import { bitmapToObjectUrl, decodeToProxy, extractGrid } from './imaging'
 
 let idCounter = 0
@@ -168,6 +169,7 @@ export async function ingestFiles(
       const structureGrid = extractGrid(bitmap, LUMA_GRID, LUMA_GRID)
       const coarseGrid = extractGrid(bitmap, COARSE_GRID, COARSE_GRID)
       const qualityGrid = extractGrid(bitmap, QUALITY_GRID, QUALITY_GRID, 'quality')
+      const features = featuresFor(bitmap)
       const proxyUrl = await bitmapToObjectUrl(bitmap)
 
       const photo: Photo = {
@@ -186,6 +188,7 @@ export async function ingestFiles(
         lumaGridCoarse: lumaGridFromImageData(coarseGrid),
         colorHist: colorHistogram(qualityGrid),
         edgeHist: edgeHistogram(qualityGrid),
+        features,
         luma: meanLuma(colorGrid),
         quality: qualityFromImageData(qualityGrid),
       }
@@ -227,6 +230,7 @@ export function refingerprint(
   | 'lumaGridCoarse'
   | 'colorHist'
   | 'edgeHist'
+  | 'features'
   | 'luma'
   | 'quality'
 > {
@@ -244,7 +248,21 @@ export function refingerprint(
     lumaGridCoarse: lumaGridFromImageData(coarseGrid),
     colorHist: colorHistogram(qualityGrid),
     edgeHist: edgeHistogram(qualityGrid),
+    features: featuresFor(bitmap),
     luma: meanLuma(colorGrid),
     quality: qualityFromImageData(qualityGrid),
   }
+}
+
+/**
+ * Detect and describe keypoints, on an aspect-preserving copy of the proxy.
+ *
+ * A square grid would squash the geometry the matcher relies on, so this is the
+ * one descriptor that needs the photo's real shape.
+ */
+function featuresFor(bitmap: ImageBitmap) {
+  const scale = Math.min(1, FEATURE_EDGE / Math.max(bitmap.width, bitmap.height))
+  const w = Math.max(64, Math.round(bitmap.width * scale))
+  const h = Math.max(64, Math.round(bitmap.height * scale))
+  return detectAndDescribe(extractGrid(bitmap, w, h, 'features'))
 }
