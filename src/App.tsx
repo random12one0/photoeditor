@@ -13,6 +13,7 @@ import {
   fetchFullFile,
   getJob,
   getPhotos,
+  jobEventsUrl,
   solveJob,
   addConstraint as apiAddConstraint,
   undoLastConstraint as apiUndoLast,
@@ -102,65 +103,79 @@ export default function App() {
     }
   }, [])
 
-  // One status check, sharable between the automatic poll loop below and a
-  // manual "Check now" button -- the button exists because the automatic
-  // loop has now been seen to silently stop advancing in a real browser
-  // session (reported live: a job that had actually finished on the backend
-  // sat showing a stale "Reading photos (12/290)" indefinitely) without a
-  // reproducible cause -- worth a button that always works regardless of
-  // whatever a given browser is doing to the polling timer, rather than
-  // chasing the exact trigger further.
-  const checkJobNow = useCallback(async (): Promise<JobSummary | null> => {
-    if (!jobId) return null
-    try {
-      const summary = await getJob(jobId)
+  // Applying one status snapshot -- shared by the SSE stream below and the
+  // manual "Check now" fallback, so both paths do the exact same "job just
+  // finished" handoff into loading photos/solve and moving to Bursts.
+  const applyJobSummary = useCallback(
+    async (summary: JobSummary) => {
       setJob(summary)
-      if (summary.status === 'ready') {
+      if (summary.status === 'ready' && jobId) {
         const [photos, solved] = await Promise.all([getPhotos(jobId), solveJob(jobId)])
         setApiPhotos(photos)
         setCars(solved)
         setStage('bursts')
       }
+    },
+    [jobId],
+  )
+
+  // Manual fallback -- a direct request-response check, for the "Check now"
+  // button on the progress screen. Kept even though the server now pushes
+  // status over SSE below, as a belt-and-suspenders escape hatch: an
+  // EventSource that silently wedges is a smaller, more specific failure
+  // mode than the plain setTimeout poll loop this replaced, but "smaller"
+  // isn't "impossible", and a manual button that always works costs nothing
+  // to keep around.
+  const checkJobNow = useCallback(async (): Promise<JobSummary | null> => {
+    if (!jobId) return null
+    try {
+      const summary = await getJob(jobId)
+      await applyJobSummary(summary)
       return summary
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Lost contact with the local server')
       return null
     }
-  }, [jobId])
+  }, [jobId, applyJobSummary])
 
-  // Poll job status until the pipeline finishes, then load its solved cars.
-  // Also re-checks the instant the tab regains focus/visibility, not just on
-  // its own 1.2s timer -- a backgrounded tab gets its setTimeout throttled
-  // (sometimes to a stop) by the browser's power-saving behaviour.
+  // Server-pushed job status over SSE, in place of the frontend asking on
+  // its own timer. Why this replaced polling: a plain client-side
+  // setTimeout loop was reported live to silently stop advancing in a real
+  // browser session -- the job had actually finished server-side, but the
+  // tab sat showing a stale progress message indefinitely, and the cause
+  // wasn't reproducible in testing. Rather than keep guessing at that one
+  // browser's specific timer/throttling behaviour, this removes the whole
+  // class of bug: the server announces state changes over one long-lived
+  // connection, and EventSource reconnects on its own if that connection
+  // drops, which a hand-rolled retry loop doesn't get for free.
   useEffect(() => {
     if (!jobId || job?.status === 'ready' || job?.status === 'error') return
     let cancelled = false
-    let timer: number | undefined
+    const source = new EventSource(jobEventsUrl(jobId))
 
-    const tick = async () => {
-      window.clearTimeout(timer)
-      const summary = await checkJobNow()
-      if (cancelled || !summary) return
-      if (summary.status !== 'ready' && summary.status !== 'error') {
-        timer = window.setTimeout(tick, 1200)
+    source.onmessage = (ev) => {
+      if (cancelled) return
+      let summary: (JobSummary & { error?: string }) | null = null
+      try {
+        summary = JSON.parse(ev.data)
+      } catch {
+        return
       }
+      if (!summary) return
+      if (summary.error) {
+        setError(summary.error)
+        source.close()
+        return
+      }
+      void applyJobSummary(summary)
+      if (summary.status === 'ready' || summary.status === 'error') source.close()
     }
 
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void tick()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
-
-    void tick()
     return () => {
       cancelled = true
-      window.clearTimeout(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
+      source.close()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId])
+  }, [jobId, job?.status, applyJobSummary])
 
   /* -------------------------------------------------------------- constraints */
 
@@ -334,8 +349,8 @@ export default function App() {
                   {checkingNow ? 'Checking…' : 'Check now'}
                 </button>
                 <p className="tiny dim" style={{ textAlign: 'center', maxWidth: 320 }}>
-                  This updates on its own every couple seconds. If it looks
-                  stuck, "Check now" always asks the server directly.
+                  This updates itself as the server works. If it looks stuck,
+                  "Check now" always asks directly.
                 </p>
               </>
             )}

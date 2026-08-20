@@ -42,6 +42,7 @@ function sameDay(a?: ApiPhoto, b?: ApiPhoto): boolean {
 export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, onNext }: Props) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<string | null>(null)
+  const [swapping, setSwapping] = useState<{ pairId: string; side: 'before' | 'after' } | null>(null)
 
   const rows = useMemo(
     () =>
@@ -68,6 +69,25 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
     try {
       await onConstraint({ type: 'forbid', before: beforeId, after: afterId })
       setDismissed((d) => new Set(d).add(pairId))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** Swap just one side of a pair and keep the other -- pinning the new
+   * combination directly is enough; the old photo on that side simply
+   * becomes free for the solver to offer somewhere else on the next solve,
+   * no separate "un-pin" step needed. */
+  const swapTo = async (pairId: string, beforeId: string, afterId: string, replacementId: string) => {
+    setBusy(pairId)
+    try {
+      if (swapping?.side === 'before') {
+        await onConstraint({ type: 'pin', before: replacementId, after: afterId })
+      } else {
+        await onConstraint({ type: 'pin', before: beforeId, after: replacementId })
+      }
+      setDismissed((d) => new Set(d).add(pairId))
+      setSwapping(null)
     } finally {
       setBusy(null)
     }
@@ -117,6 +137,18 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
                       />
                       <p className="tiny dim mono" style={{ marginTop: 4 }}>{before?.name}</p>
                       <p className="tiny dim mono">{formatTakenAt(before)}</p>
+                      <button
+                        className="btn ghost sm"
+                        style={{ marginTop: 4, width: '100%', fontSize: '0.7rem' }}
+                        disabled={busy === pair.id}
+                        onClick={() =>
+                          setSwapping((s) =>
+                            s?.pairId === pair.id && s.side === 'before' ? null : { pairId: pair.id, side: 'before' },
+                          )
+                        }
+                      >
+                        <Icon name="swap" size={13} /> Replace before
+                      </button>
                     </div>
                     <div style={{ flex: 1 }}>
                       <img
@@ -126,8 +158,48 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
                       />
                       <p className="tiny dim mono" style={{ marginTop: 4 }}>{after?.name}</p>
                       <p className="tiny dim mono">{formatTakenAt(after)}</p>
+                      <button
+                        className="btn ghost sm"
+                        style={{ marginTop: 4, width: '100%', fontSize: '0.7rem' }}
+                        disabled={busy === pair.id}
+                        onClick={() =>
+                          setSwapping((s) =>
+                            s?.pairId === pair.id && s.side === 'after' ? null : { pairId: pair.id, side: 'after' },
+                          )
+                        }
+                      >
+                        <Icon name="swap" size={13} /> Replace after
+                      </button>
                     </div>
                   </div>
+                  {swapping?.pairId === pair.id && (
+                    <div style={{ marginTop: 8 }}>
+                      <p className="tiny dim" style={{ margin: '4px 0' }}>
+                        Pick a replacement {swapping.side} photo for this car:
+                      </p>
+                      <div className="thumb-grid">
+                        {car.bursts
+                          .filter((b) => b.side === swapping.side)
+                          .map((b) => b.representative_id)
+                          .filter((pid) => pid !== pair[swapping.side === 'before' ? 'before_id' : 'after_id'])
+                          .map((pid) => {
+                            const candidate = photoById.get(pid)
+                            return (
+                              <button
+                                key={pid}
+                                className="thumb"
+                                title={candidate?.name}
+                                aria-label={candidate?.name}
+                                disabled={busy === pair.id}
+                                onClick={() => void swapTo(pair.id, pair.before_id, pair.after_id, pid)}
+                              >
+                                <img src={imageUrl(jobId, pid)} alt="" loading="lazy" />
+                              </button>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  )}
                   {spansDays && (
                     <p className="tiny" style={{ color: 'var(--no, #e5484d)', marginTop: 6 }}>
                       <Icon name="clock" size={12} /> These were taken on different days — worth a second look.

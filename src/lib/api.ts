@@ -101,6 +101,12 @@ export function getJob(jobId: string): Promise<JobSummary> {
   return jsonFetch(`/jobs/${jobId}`)
 }
 
+/** Server-sent-events URL for job status -- the server pushes a message on
+ * every change instead of the client having to keep asking. */
+export function jobEventsUrl(jobId: string): string {
+  return `${BASE}/jobs/${jobId}/events`
+}
+
 export function getPhotos(jobId: string): Promise<ApiPhoto[]> {
   return jsonFetch(`/jobs/${jobId}/photos`)
 }
