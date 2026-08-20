@@ -20,7 +20,12 @@ interface Props {
  * pick; select two representatives from different bursts and "Merge" folds
  * them into one; select any single non-representative member and "Split
  * out" gives it its own burst, for the case this collapsed something that
- * shouldn't have been.
+ * shouldn't have been. "Not part of the wash" excludes a photo entirely --
+ * a snow-foam "fun cannon" shot, say -- so it's never offered as a before
+ * or after. That's a one-click manual call rather than an automatic one on
+ * purpose: appearance statistics alone can't reliably tell a foam-coated
+ * car apart from a genuinely white or silver one (checked, and they're too
+ * close), so a person deciding beats a heuristic guessing wrong.
  */
 export default function BurstsView({ jobId, cars, photoById, onConstraint, onNext }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -64,6 +69,14 @@ export default function BurstsView({ jobId, cars, photoById, onConstraint, onNex
       for (let i = 1; i < ids.length; i++) {
         await onConstraint({ type: 'burstMerge', a: ids[0], b: ids[i] })
       }
+    })
+  }
+
+  const excludeSelected = () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    void run(async () => {
+      for (const id of ids) await onConstraint({ type: 'exclude', photo_id: id })
     })
   }
 
@@ -128,6 +141,10 @@ export default function BurstsView({ jobId, cars, photoById, onConstraint, onNex
           <button className="btn ghost sm" disabled={busy || selected.size < 2} onClick={mergeSelected}>
             <Icon name="merge" size={15} />
             Merge
+          </button>
+          <button className="btn ghost sm" disabled={busy || selected.size === 0} onClick={excludeSelected}>
+            <Icon name="trash" size={15} />
+            Not part of the wash
           </button>
           <div style={{ flex: 1 }} />
           <button className="btn primary" onClick={onNext}>

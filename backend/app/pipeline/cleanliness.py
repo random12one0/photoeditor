@@ -37,8 +37,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.config import SNOW_FOAM_AREA_FRACTION, SNOW_FOAM_MAX_SATURATION
-
 FEATURE_EDGE = 640  # downscale target; these are coarse statistics, not detection
 
 
@@ -84,16 +82,4 @@ def cleanliness_features(path: Path) -> CleanlinessFeatures:
         edge_density=edge_density,
         laplacian_variance=laplacian_variance,
         specular_fraction=specular_fraction,
-    )
-
-
-def looks_like_snow_foam(features: CleanlinessFeatures) -> bool:
-    """A car coated in cannon foam, not a real wash step -- see
-    config.SNOW_FOAM_AREA_FRACTION for the reasoning and the caveat that
-    this is an unvalidated default. `specular_fraction` already measures
-    exactly the mask this needs (bright + desaturated); foam just asks for
-    a lot more of the frame to be covered than a highlight ever is."""
-    return (
-        features.specular_fraction >= SNOW_FOAM_AREA_FRACTION
-        and features.saturation <= SNOW_FOAM_MAX_SATURATION
     )

@@ -38,7 +38,6 @@ class PhotoRecord:
     content_hash: str
     quality: float = 0.5
     side: str = "unknown"
-    is_snow_foam: bool = False
 
 
 @dataclass
