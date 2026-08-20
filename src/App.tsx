@@ -1,483 +1,190 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import BurstsView from './components/BurstsView'
 import ExportView from './components/ExportView'
-import GroupsView from './components/GroupsView'
 import Icon from './components/Icon'
-import ImportView from './components/ImportView'
-import LabView from './components/LabView'
-import PairView from './components/PairView'
+import LeftoversView from './components/LeftoversView'
 import ShortcutSheet from './components/ShortcutSheet'
 import StyleView from './components/StyleView'
+import VerifyPairsView from './components/VerifyPairsView'
 import { APP_NAME } from './brand'
-import { clearBitmapCache, dropFromCache } from './lib/bitmapCache'
-import { releaseScratch } from './lib/canvasPool'
 import {
-  DEFAULT_CLUSTER_SETTINGS,
-  buildGroups,
-  findPairs,
-  resuggestGroup,
-} from './lib/cluster'
-import { refingerprint } from './lib/ingest'
-import {
-  clearSession,
-  loadClusterSettings,
-  loadPreset,
-  loadSavedPresets,
-  loadSession,
-  saveClusterSettings,
-  savePreset,
-  saveSavedPresets,
-  saveSession,
-} from './lib/db'
-import { bitmapToObjectUrl, decodeToProxy } from './lib/imaging'
+  browseFolder,
+  createJob,
+  fetchFullFile,
+  getJob,
+  getPhotos,
+  solveJob,
+  addConstraint as apiAddConstraint,
+  undoLastConstraint as apiUndoLast,
+} from './lib/api'
+import type { ApiCarSolution, ApiPhoto, ConstraintIn, JobSummary } from './lib/api'
+import { loadPreset, loadSavedPresets, savePreset, saveSavedPresets } from './lib/db'
+import { buildGroups, buildPhotoMap } from './lib/photoAdapter'
 import { DEFAULT_PRESET } from './lib/render'
-import type {
-  ClusterSettings,
-  Group,
-  Photo,
-  SavedPreset,
-  StylePreset,
-} from './types'
+import type { SavedPreset, StylePreset } from './types'
 
-/**
- * 'lab' is deliberately absent from the stepper below.
- *
- * The stepper is a description of the job — import, group, pair, style, export —
- * and every step in it is one everybody has to do. The lab is a side room: it
- * measures the matcher rather than producing anything, and putting it in the
- * line would imply it was part of the work. It has its own button in the header.
- */
-export type Stage = 'import' | 'cars' | 'pairs' | 'style' | 'export' | 'lab'
+export type Stage = 'choose' | 'bursts' | 'verify' | 'leftovers' | 'style' | 'export'
 
-const STAGES: {
-  id: Exclude<Stage, 'lab'>
-  label: string
-  icon: Parameters<typeof Icon>[0]['name']
-}[] = [
-  { id: 'import', label: 'Import', icon: 'upload' },
-  { id: 'cars', label: 'Cars', icon: 'cars' },
-  { id: 'pairs', label: 'Pairs', icon: 'pair' },
+const STAGES: { id: Stage; label: string; icon: Parameters<typeof Icon>[0]['name'] }[] = [
+  { id: 'choose', label: 'Folder', icon: 'upload' },
+  { id: 'bursts', label: 'Bursts', icon: 'cars' },
+  { id: 'verify', label: 'Verify', icon: 'pair' },
+  { id: 'leftovers', label: 'Leftovers', icon: 'flask' },
   { id: 'style', label: 'Style', icon: 'sliders' },
   { id: 'export', label: 'Export', icon: 'share' },
 ]
 
-/** One undoable step. Snapshots are shallow — cheap, since photos are shared. */
-interface Snapshot {
-  photos: Photo[]
-  groups: Group[]
-  label: string
-}
-
-const MAX_UNDO = 40
-
 interface Toast {
   id: number
   message: string
-  undoable: boolean
 }
 
 export default function App() {
-  const [photos, setPhotos] = useState<Photo[]>([])
-  const [groups, setGroups] = useState<Group[]>([])
-  const [stage, setStage] = useState<Stage>('import')
-  const [preset, setPreset] = useState<StylePreset>(() => loadPreset(DEFAULT_PRESET))
-  const [savedPresets, setSavedPresets] = useState<SavedPreset[]>(() => loadSavedPresets())
-  const [clusterSettings, setClusterSettings] = useState<ClusterSettings>(() =>
-    loadClusterSettings(DEFAULT_CLUSTER_SETTINGS),
-  )
-  const [restoring, setRestoring] = useState(true)
+  const [stage, setStage] = useState<Stage>('choose')
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [job, setJob] = useState<JobSummary | null>(null)
+  const [apiPhotos, setApiPhotos] = useState<ApiPhoto[]>([])
+  const [cars, setCars] = useState<ApiCarSolution[]>([])
+  const [files, setFiles] = useState<Map<string, File>>(new Map())
+  const [preparingExport, setPreparingExport] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
 
-  const history = useRef<Snapshot[]>([])
+  const [preset, setPreset] = useState<StylePreset>(() => loadPreset(DEFAULT_PRESET))
+  const [savedPresets, setSavedPresets] = useState<SavedPreset[]>(() => loadSavedPresets())
+
   const toastSeq = useRef(0)
   const toastTimer = useRef<number | undefined>(undefined)
 
-  const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos])
-
-  const notify = useCallback((message: string, undoable = false) => {
+  const notify = useCallback((message: string) => {
     const id = ++toastSeq.current
-    setToast({ id, message, undoable })
+    setToast({ id, message })
     window.clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(
-      () => setToast((t) => (t?.id === id ? null : t)),
-      undoable ? 5000 : 3000,
-    )
+    toastTimer.current = window.setTimeout(() => setToast((t) => (t?.id === id ? null : t)), 3200)
   }, [])
 
-  /** Record the current state so the next mutation can be taken back. */
-  const checkpoint = useCallback(
-    (label: string) => {
-      history.current.push({ photos, groups, label })
-      if (history.current.length > MAX_UNDO) history.current.shift()
-    },
-    [photos, groups],
-  )
+  useEffect(() => savePreset(preset), [preset])
+  useEffect(() => saveSavedPresets(savedPresets), [savedPresets])
 
-  const undo = useCallback(() => {
-    const prev = history.current.pop()
-    if (!prev) {
-      notify('Nothing to undo')
-      return
-    }
-    setPhotos(prev.photos)
-    setGroups(prev.groups)
-    notify(`Undid: ${prev.label}`)
-  }, [notify])
-
-  const canUndo = history.current.length > 0
-
-  /* ---------------------------------------------------------------- restore */
+  // Reattach to a job by id from the URL (?job=...) -- lets a reload pick
+  // back up instead of losing the whole session, and gives the folder-pick
+  // step a URL worth bookmarking mid-job.
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get('job')
+    if (fromUrl) setJobId(fromUrl)
+  }, [])
 
   useEffect(() => {
+    const url = new URL(window.location.href)
+    if (jobId) url.searchParams.set('job', jobId)
+    else url.searchParams.delete('job')
+    window.history.replaceState(null, '', url)
+  }, [jobId])
+
+  /* ------------------------------------------------------------- job intake */
+
+  const chooseFolder = useCallback(async () => {
+    setError(null)
+    setBrowsing(true)
+    try {
+      const picked = await browseFolder()
+      if (picked.cancelled || !picked.path) return
+      const summary = await createJob(picked.path)
+      setJobId(summary.id)
+      setJob(summary)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reach the local server')
+    } finally {
+      setBrowsing(false)
+    }
+  }, [])
+
+  // Poll job status until the pipeline finishes, then load its solved cars.
+  useEffect(() => {
+    if (!jobId || job?.status === 'ready' || job?.status === 'error') return
     let cancelled = false
-    ;(async () => {
+    const tick = async () => {
       try {
-        const saved = await loadSession()
-        if (!saved || cancelled) return
-
-        // Proxies are object URLs, which don't survive a reload — rebuild them
-        // from the stored files.
-        const restored: Photo[] = []
-        for (const meta of saved.photos) {
-          const file = saved.files.get(meta.id)
-          if (!file) continue
-          const { bitmap } = await decodeToProxy(file)
-          const proxyUrl = await bitmapToObjectUrl(bitmap)
-
-          /* Re-derive everything computed from the pixels rather than trusting
-             what was saved. The photo is already decoded here to rebuild its
-             preview, so this costs almost nothing — and the alternative is
-             running new matching code over fingerprints produced by an older
-             build, which is precisely the bug this exists to prevent. */
-          const fresh = saved.stale ? refingerprint(bitmap) : null
-          bitmap.close()
-          restored.push({
-            ...meta,
-            ...(fresh ?? {}),
-            /* A session saved before shot quality existed has no score. Neutral
-               rather than zero, so an old session doesn't rank every photo last. */
-            quality: fresh?.quality ?? meta.quality ?? 0.5,
-            file,
-            proxyUrl,
-          })
-        }
+        const summary = await getJob(jobId)
         if (cancelled) return
-
-        setPhotos(restored)
-
-        /* Suggestions made by an older build carry its mistakes, and its pairs
-           are missing whatever later versions added — runners-up, for one, so
-           "not a pair" would still just delete rather than offering the next
-           candidate. Rebuilding them is the only honest option, and it is
-           undoable. */
-        if (saved.stale && restored.length) {
-          setGroups(buildGroups(restored, DEFAULT_CLUSTER_SETTINGS))
-          setStage('cars')
-          notify(
-            `Matching has improved since this session was saved — ${restored.length} photos re-matched`,
-            true,
-          )
-        } else {
-          setGroups(saved.groups)
-          if (restored.length) {
-            setStage('cars')
-            notify(`Picked up where you left off — ${restored.length} photos`)
-          }
+        setJob(summary)
+        if (summary.status === 'ready') {
+          const [photos, solved] = await Promise.all([getPhotos(jobId), solveJob(jobId)])
+          if (cancelled) return
+          setApiPhotos(photos)
+          setCars(solved)
+          setStage('bursts')
+        } else if (summary.status !== 'error') {
+          window.setTimeout(tick, 1200)
         }
-      } finally {
-        if (!cancelled) setRestoring(false)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Lost contact with the local server')
       }
-    })()
+    }
+    void tick()
     return () => {
       cancelled = true
     }
-  }, [notify])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId])
 
-  /* ------------------------------------------------------------- persistence */
+  /* -------------------------------------------------------------- constraints */
 
-  useEffect(() => {
-    if (restoring) return
-    const id = window.setTimeout(() => {
-      void saveSession(photos, groups).catch(() =>
-        notify('Could not save your session — storage may be full'),
+  const applyConstraint = useCallback(
+    async (c: ConstraintIn) => {
+      if (!jobId) return
+      const solved = await apiAddConstraint(jobId, c)
+      setCars(solved)
+    },
+    [jobId],
+  )
+
+  const undo = useCallback(async () => {
+    if (!jobId) return
+    const solved = await apiUndoLast(jobId)
+    setCars(solved)
+    notify('Undid last change')
+  }, [jobId, notify])
+
+  /* -------------------------------------------------------------------- style */
+
+  const photoById = useMemo(() => new Map(apiPhotos.map((p) => [p.id, p])), [apiPhotos])
+
+  const enterStyle = useCallback(async () => {
+    if (!jobId || apiPhotos.length === 0) {
+      setStage('style')
+      return
+    }
+    setPreparingExport(true)
+    try {
+      const entries = await Promise.all(
+        apiPhotos.map(async (p) => [p.id, await fetchFullFile(jobId, p)] as const),
       )
-    }, 900)
-    return () => window.clearTimeout(id)
-  }, [photos, groups, restoring, notify])
+      setFiles(new Map(entries))
+      setStage('style')
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not load full-resolution photos')
+    } finally {
+      setPreparingExport(false)
+    }
+  }, [jobId, apiPhotos, notify])
 
-  useEffect(() => savePreset(preset), [preset])
-  useEffect(() => saveClusterSettings(clusterSettings), [clusterSettings])
-  useEffect(() => saveSavedPresets(savedPresets), [savedPresets])
-
-  /* ------------------------------------------------------------------ import */
-
-  const handleImported = useCallback(
-    (incoming: Photo[]) => {
-      if (!incoming.length) return
-      checkpoint('import')
-      setPhotos((prev) => {
-        const all = [...prev, ...incoming]
-        setGroups(buildGroups(all, clusterSettings))
-        return all
-      })
-      setStage('cars')
-    },
-    [clusterSettings, checkpoint],
+  const groups = useMemo(() => buildGroups(cars), [cars])
+  const photoMap = useMemo(
+    () => buildPhotoMap(apiPhotos, jobId ?? '', files),
+    [apiPhotos, jobId, files],
   )
-
-  /**
-   * Re-solve one car's suggestions around what the user has said so far.
-   *
-   * Confirmed pairs are kept, rejected combinations stay rejected, and
-   * everything else is matched again from scratch. Called after every rejection,
-   * because a rejection frees a photo and the rest of the car should get the
-   * chance to use it.
-   */
-  const resuggest = useCallback(
-    (groupId: string) => {
-      setGroups((prev) =>
-        prev.map((g) =>
-          g.id === groupId
-            ? { ...g, pairs: resuggestGroup(g, photoMap, clusterSettings) }
-            : g,
-        ),
-      )
-    },
-    [photoMap, clusterSettings],
-  )
-
-  /** Throw away every suggestion *and* every rejection for one car. */
-  const rematchGroup = useCallback(
-    (groupId: string) => {
-      checkpoint('re-match car')
-      setGroups((prev) =>
-        prev.map((g) => {
-          if (g.id !== groupId) return g
-          const photos = g.photoIds
-            .map((id) => photoMap.get(id))
-            .filter((p): p is Photo => Boolean(p))
-          return { ...g, rejected: [], pairs: findPairs(photos, clusterSettings) }
-        }),
-      )
-      notify('Car matched again from scratch', true)
-    },
-    [photoMap, clusterSettings, checkpoint, notify],
-  )
-
-  const regroup = useCallback(
-    (settings: ClusterSettings) => {
-      checkpoint('re-group')
-      setClusterSettings(settings)
-      setGroups(buildGroups(photos, settings))
-      notify('Re-grouped from scratch', true)
-    },
-    [photos, notify, checkpoint],
-  )
-
-  const reset = useCallback(async () => {
-    photos.forEach((p) => URL.revokeObjectURL(p.proxyUrl))
-    clearBitmapCache()
-    releaseScratch()
-    history.current = []
-    await clearSession()
-    setPhotos([])
-    setGroups([])
-    setStage('import')
-  }, [photos])
-
-  /* ------------------------------------------------------------- group edits */
-
-  const renameGroup = useCallback((id: string, name: string) => {
-    setGroups((gs) => gs.map((g) => (g.id === id ? { ...g, name } : g)))
-  }, [])
-
-  const mergeGroups = useCallback(
-    (ids: string[]) => {
-      if (ids.length < 2) return
-      checkpoint('merge cars')
-      setGroups((gs) => {
-        const chosen = gs.filter((g) => ids.includes(g.id))
-        if (chosen.length < 2) return gs
-        const target = chosen[0]
-        const ordered = chosen
-          .flatMap((g) => g.photoIds)
-          .map((id) => photoMap.get(id))
-          .filter((p): p is Photo => Boolean(p))
-          .sort((a, b) => a.takenAt - b.takenAt)
-
-        const merged: Group = {
-          ...target,
-          photoIds: ordered.map((p) => p.id),
-          pairs: mergePairs(
-            chosen.flatMap((g) => g.pairs).filter((p) => p.confirmed),
-            findPairs(ordered, clusterSettings),
-          ),
-        }
-        return gs
-          .filter((g) => !ids.includes(g.id) || g.id === target.id)
-          .map((g) => (g.id === target.id ? merged : g))
-      })
-      notify('Merged', true)
-    },
-    [photoMap, clusterSettings, notify, checkpoint],
-  )
-
-  const splitPhotosToNewGroup = useCallback(
-    (fromGroupId: string, photoIds: string[]) => {
-      if (!photoIds.length) return
-      checkpoint('split out photos')
-      const moving = new Set(photoIds)
-      setGroups((gs) => {
-        const source = gs.find((g) => g.id === fromGroupId)
-        if (!source) return gs
-
-        const movedPhotos = photoIds
-          .map((id) => photoMap.get(id))
-          .filter((p): p is Photo => Boolean(p))
-          .sort((a, b) => a.takenAt - b.takenAt)
-
-        const newGroup: Group = {
-          id: `g${Date.now().toString(36)}_split`,
-          name: `${source.name} (split)`,
-          photoIds: movedPhotos.map((p) => p.id),
-          pairs: findPairs(movedPhotos, clusterSettings),
-        }
-        const updatedSource: Group = {
-          ...source,
-          photoIds: source.photoIds.filter((id) => !moving.has(id)),
-          pairs: source.pairs.filter(
-            (p) => !moving.has(p.beforeId) && !moving.has(p.afterId),
-          ),
-        }
-
-        const next = gs.map((g) => (g.id === fromGroupId ? updatedSource : g))
-        next.splice(next.findIndex((g) => g.id === fromGroupId) + 1, 0, newGroup)
-        return next.filter((g) => g.photoIds.length > 0)
-      })
-      notify(`Split ${photoIds.length} out`, true)
-    },
-    [photoMap, clusterSettings, notify, checkpoint],
-  )
-
-  const movePhotos = useCallback(
-    (photoIds: string[], toGroupId: string) => {
-      checkpoint('move photos')
-      const moving = new Set(photoIds)
-      setGroups((gs) =>
-        gs
-          .map((g) => {
-            if (g.id === toGroupId) {
-              const combined = [...new Set([...g.photoIds, ...photoIds])]
-                .map((id) => photoMap.get(id))
-                .filter((p): p is Photo => Boolean(p))
-                .sort((a, b) => a.takenAt - b.takenAt)
-              return {
-                ...g,
-                photoIds: combined.map((p) => p.id),
-                pairs: mergePairs(
-                  g.pairs.filter((p) => p.confirmed),
-                  findPairs(combined, clusterSettings),
-                ),
-              }
-            }
-            return {
-              ...g,
-              photoIds: g.photoIds.filter((id) => !moving.has(id)),
-              pairs: g.pairs.filter(
-                (p) => !moving.has(p.beforeId) && !moving.has(p.afterId),
-              ),
-            }
-          })
-          .filter((g) => g.photoIds.length > 0),
-      )
-      notify('Moved', true)
-    },
-    [photoMap, clusterSettings, notify, checkpoint],
-  )
-
-  const deletePhotos = useCallback(
-    (photoIds: string[]) => {
-      checkpoint('remove photos')
-      const doomed = new Set(photoIds)
-      setPhotos((ps) => {
-        // Object URLs are deliberately NOT revoked here: undo restores these
-        // same Photo objects, and a revoked URL would come back blank.
-        ps.filter((p) => doomed.has(p.id)).forEach((p) => dropFromCache(p.id))
-        return ps.filter((p) => !doomed.has(p.id))
-      })
-      setGroups((gs) =>
-        gs
-          .map((g) => ({
-            ...g,
-            photoIds: g.photoIds.filter((id) => !doomed.has(id)),
-            pairs: g.pairs.filter(
-              (p) => !doomed.has(p.beforeId) && !doomed.has(p.afterId),
-            ),
-          }))
-          .filter((g) => g.photoIds.length > 0),
-      )
-      notify(`Removed ${photoIds.length}`, true)
-    },
-    [notify, checkpoint],
-  )
-
-  const updateGroup = useCallback(
-    (groupId: string, updater: (g: Group) => Group, label?: string) => {
-      if (label) checkpoint(label)
-      setGroups((gs) => gs.map((g) => (g.id === groupId ? updater(g) : g)))
-    },
-    [checkpoint],
-  )
-
-  /**
-   * Correct a photo's capture time.
-   *
-   * Everything downstream — which car a photo lands in, which shots are the
-   * before batch, which pairs get proposed — is built on these timestamps. When
-   * a photo arrives without EXIF, or with a time set by whatever copied it
-   * rather than the camera, the grouping inherits that error and no amount of
-   * merging and splitting really fixes it. Editing the time at the source does.
-   */
-  const setPhotoTime = useCallback(
-    (photoId: string, takenAt: number) => {
-      checkpoint('change photo time')
-      setPhotos((ps) =>
-        ps.map((p) =>
-          p.id === photoId ? { ...p, takenAt, timeIsApproximate: false } : p,
-        ),
-      )
-      // Keep each car's photos in time order so the before/after split, which
-      // looks for the widest internal pause, still sees the right sequence.
-      setGroups((gs) =>
-        gs.map((g) => ({
-          ...g,
-          photoIds: [...g.photoIds].sort((a, b) => {
-            const ta = a === photoId ? takenAt : (photoMap.get(a)?.takenAt ?? 0)
-            const tb = b === photoId ? takenAt : (photoMap.get(b)?.takenAt ?? 0)
-            return ta - tb
-          }),
-        })),
-      )
-      notify('Time updated — re-group to rebuild the cars around it', true)
-    },
-    [photoMap, notify, checkpoint],
-  )
-
-  /* ---------------------------------------------------------------- presets */
 
   const savePresetAs = useCallback(
     (name: string) => {
-      const entry: SavedPreset = {
-        id: `sp${Date.now().toString(36)}`,
-        name,
-        preset,
-      }
+      const entry: SavedPreset = { id: `sp${Date.now().toString(36)}`, name, preset }
       setSavedPresets((ps) => [...ps.filter((p) => p.name !== name), entry])
       notify(`Saved "${name}"`)
     },
     [preset, notify],
   )
-
   const applyPreset = useCallback(
     (id: string) => {
       const found = savedPresets.find((p) => p.id === id)
@@ -488,67 +195,18 @@ export default function App() {
     },
     [savedPresets, notify],
   )
-
-  const deletePreset = useCallback((id: string) => {
-    setSavedPresets((ps) => ps.filter((p) => p.id !== id))
-  }, [])
-
-  /* -------------------------------------------------------------- shortcuts */
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null
-      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return
-
-      if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-        e.preventDefault()
-        setShowShortcuts((v) => !v)
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        undo()
-      } else if (e.key === 'Escape') {
-        setShowShortcuts(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [undo])
+  const deletePreset = useCallback((id: string) => setSavedPresets((ps) => ps.filter((p) => p.id !== id)), [])
 
   /* ------------------------------------------------------------------ render */
 
-  const pairCount = groups.reduce((n, g) => n + g.pairs.length, 0)
-  const confirmedCount = groups.reduce(
-    (n, g) => n + g.pairs.filter((p) => p.confirmed).length,
-    0,
-  )
-
-  if (restoring) {
-    return (
-      <div className="boot">
-        <div className="boot-mark">{APP_NAME}</div>
-        <div className="spinner" />
-        <div className="tiny dim">Looking for a saved session</div>
-      </div>
-    )
-  }
-
-  const stageDone: Record<Exclude<Stage, 'lab'>, boolean> = {
-    import: photos.length > 0,
-    cars: groups.length > 0,
-    pairs: pairCount > 0 && confirmedCount === pairCount,
-    style: false,
-    export: false,
-  }
+  const pairCount = cars.reduce((n, c) => n + c.pairs.length, 0)
+  const confirmedCount = cars.reduce((n, c) => n + c.pairs.filter((p) => p.tier === 'confirmed').length, 0)
+  const jobActive = jobId !== null && stage !== 'choose'
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="topbar-row">
-          {/* The version, on screen. A stale cached build and a genuinely broken
-              feature look identical from the outside; this is the difference
-              between diagnosing that and guessing at it. The number is short
-              enough to read out; the date and commit sit under Import for when
-              that isn't specific enough. */}
           <div className="brand" title={`Build ${__BUILD_ID__}`}>
             <span className="brand-dot" />
             {APP_NAME}
@@ -557,45 +215,30 @@ export default function App() {
             </span>
           </div>
           <div className="counts">
-            {photos.length > 0 && (
+            {apiPhotos.length > 0 && (
               <>
-                <span className="mono" title="photos">
-                  {photos.length}
-                </span>
+                <span className="mono" title="photos">{apiPhotos.length}</span>
                 <span className="dim label">photos</span>
-                <span className="mono" title="cars">
-                  {groups.length}
-                </span>
+                <span className="mono" title="cars">{cars.length}</span>
                 <span className="dim label">cars</span>
-                <span className="mono" title="pairs confirmed">
-                  {confirmedCount}/{pairCount}
-                </span>
+                <span className="mono" title="pairs confirmed">{confirmedCount}/{pairCount}</span>
                 <span className="dim label">pairs</span>
               </>
             )}
           </div>
           <button
             className="icon-btn"
-            onClick={undo}
-            disabled={!canUndo}
-            title="Undo (Ctrl+Z)"
+            onClick={() => void undo()}
+            disabled={!jobActive}
+            title="Undo last constraint"
             aria-label="Undo"
           >
             <Icon name="undo" />
           </button>
           <button
-            className={`icon-btn${stage === 'lab' ? ' active' : ''}`}
-            onClick={() => setStage((s) => (s === 'lab' ? 'cars' : 'lab'))}
-            title="Lab — judge pairs and measure the matcher"
-            aria-label="Lab"
-            data-testid="lab-open"
-          >
-            <Icon name="flask" />
-          </button>
-          <button
             className="icon-btn"
             onClick={() => setShowShortcuts(true)}
-            title="Keyboard shortcuts (?)"
+            title="Keyboard shortcuts"
             aria-label="Keyboard shortcuts"
           >
             <Icon name="keyboard" />
@@ -604,7 +247,7 @@ export default function App() {
 
         <nav className="stepper" aria-label="Stages">
           {STAGES.map((s) => {
-            const locked = s.id !== 'import' && photos.length === 0
+            const locked = s.id !== 'choose' && !jobActive
             return (
               <button
                 key={s.id}
@@ -614,11 +257,7 @@ export default function App() {
                 disabled={locked}
                 onClick={() => setStage(s.id)}
               >
-                <Icon
-                  name={stageDone[s.id] && stage !== s.id ? 'check' : s.icon}
-                  size={16}
-                  className={stageDone[s.id] && stage !== s.id ? 'step-done' : undefined}
-                />
+                <Icon name={s.icon} size={16} />
                 {s.label}
               </button>
             )
@@ -626,99 +265,81 @@ export default function App() {
         </nav>
       </header>
 
-      {stage === 'import' && (
-        <ImportView
-          existingCount={photos.length}
-          onImported={handleImported}
-          onReset={reset}
-          notify={notify}
-        />
+      {stage === 'choose' && (
+        <main className="content">
+          <div className="wrap" style={{ display: 'grid', placeItems: 'center', minHeight: '60vh', gap: 16 }}>
+            {!job || job.status === 'error' ? (
+              <>
+                <p className="muted" style={{ textAlign: 'center', maxWidth: 420 }}>
+                  Point this at a folder of photos from one day's work. Everything runs on this
+                  machine — nothing uploads anywhere.
+                </p>
+                <button className="btn primary" disabled={browsing} onClick={() => void chooseFolder()}>
+                  <Icon name="upload" size={17} />
+                  {browsing ? 'Opening…' : 'Choose a folder'}
+                </button>
+                {(error || job?.status === 'error') && (
+                  <p className="tiny" style={{ color: 'var(--no, #e5484d)' }}>
+                    {error ?? job?.message}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="spinner" />
+                <p className="tiny dim mono">{job.message || job.status}</p>
+                <div className="bar" style={{ width: 260 }}>
+                  <div className="bar-fill" style={{ width: `${Math.round(job.progress * 100)}%` }} />
+                </div>
+              </>
+            )}
+          </div>
+        </main>
       )}
-      {stage === 'cars' && (
-        <GroupsView
-          groups={groups}
-          photoMap={photoMap}
-          clusterSettings={clusterSettings}
-          onRegroup={regroup}
-          onRename={renameGroup}
-          onMerge={mergeGroups}
-          onSplit={splitPhotosToNewGroup}
-          onMove={movePhotos}
-          onDelete={deletePhotos}
-          onSetTime={setPhotoTime}
-          onNext={() => setStage('pairs')}
-        />
+
+      {stage === 'bursts' && jobId && (
+        <BurstsView jobId={jobId} cars={cars} photoById={photoById} onConstraint={applyConstraint} onNext={() => setStage('verify')} />
       )}
-      {stage === 'pairs' && (
-        <PairView
-          groups={groups}
-          photoMap={photoMap}
-          preset={preset}
-          onUpdateGroup={updateGroup}
-          onResuggest={resuggest}
-          onRematch={rematchGroup}
-          clusterSettings={clusterSettings}
-          onNext={() => setStage('style')}
-          notify={notify}
-        />
+      {stage === 'verify' && jobId && (
+        <VerifyPairsView jobId={jobId} cars={cars} photoById={photoById} onConstraint={applyConstraint} onNext={() => setStage('leftovers')} />
+      )}
+      {stage === 'leftovers' && jobId && (
+        <LeftoversView jobId={jobId} cars={cars} photoById={photoById} onConstraint={applyConstraint} onNext={() => void enterStyle()} />
       )}
       {stage === 'style' && (
-        <StyleView
-          groups={groups}
-          photoMap={photoMap}
-          preset={preset}
-          savedPresets={savedPresets}
-          onChange={setPreset}
-          onSavePreset={savePresetAs}
-          onApplyPreset={applyPreset}
-          onDeletePreset={deletePreset}
-          onNext={() => setStage('export')}
-          notify={notify}
-        />
-      )}
-      {stage === 'lab' && (
-        <LabView
-          groups={groups}
-          photoMap={photoMap}
-          clusterSettings={clusterSettings}
-          notify={notify}
-        />
+        preparingExport ? (
+          <main className="content">
+            <div className="wrap" style={{ display: 'grid', placeItems: 'center', minHeight: '40vh', gap: 12 }}>
+              <div className="spinner" />
+              <p className="tiny dim">Loading full-resolution photos…</p>
+            </div>
+          </main>
+        ) : (
+          <StyleView
+            groups={groups}
+            photoMap={photoMap}
+            preset={preset}
+            savedPresets={savedPresets}
+            onChange={setPreset}
+            onSavePreset={savePresetAs}
+            onApplyPreset={applyPreset}
+            onDeletePreset={deletePreset}
+            onNext={() => setStage('export')}
+            notify={notify}
+          />
+        )
       )}
       {stage === 'export' && (
-        <ExportView
-          groups={groups}
-          photoMap={photoMap}
-          preset={preset}
-          notify={notify}
-        />
+        <ExportView groups={groups} photoMap={photoMap} preset={preset} notify={notify} />
       )}
 
       {toast && (
         <div className="toast" role="status">
           <span>{toast.message}</span>
-          {toast.undoable && canUndo && (
-            <button
-              onClick={() => {
-                undo()
-                setToast(null)
-              }}
-            >
-              Undo
-            </button>
-          )}
         </div>
       )}
 
       {showShortcuts && <ShortcutSheet onClose={() => setShowShortcuts(false)} />}
     </div>
   )
-}
-
-/** Keep confirmed pairs, and fill in around them with fresh suggestions. */
-function mergePairs(confirmed: Group['pairs'], suggested: Group['pairs']): Group['pairs'] {
-  const claimed = new Set(confirmed.flatMap((p) => [p.beforeId, p.afterId]))
-  return [
-    ...confirmed,
-    ...suggested.filter((p) => !claimed.has(p.beforeId) && !claimed.has(p.afterId)),
-  ]
 }

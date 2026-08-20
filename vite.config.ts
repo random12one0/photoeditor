@@ -46,4 +46,12 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+  server: {
+    // Only used by `npm run dev` -- the shipped launcher serves the built
+    // frontend from the same FastAPI process the API lives on, so there's
+    // no cross-origin request to proxy there.
+    proxy: {
+      '/api': 'http://127.0.0.1:8420',
+    },
+  },
 })
