@@ -102,10 +102,21 @@ export default function App() {
   }, [])
 
   // Poll job status until the pipeline finishes, then load its solved cars.
+  //
+  // Also re-checks the instant the tab regains focus/visibility, not just on
+  // its own 1.2s timer -- a backgrounded tab gets its setTimeout throttled
+  // (sometimes to a stop) by the browser's power-saving behaviour, and
+  // without this a job that actually finished minutes ago while the tab sat
+  // in the background looks permanently stuck on "reading photos" until the
+  // page is manually reloaded. Reported exactly that way on a real 290-photo
+  // job that had, in fact, already finished server-side.
   useEffect(() => {
     if (!jobId || job?.status === 'ready' || job?.status === 'error') return
     let cancelled = false
+    let timer: number | undefined
+
     const tick = async () => {
+      window.clearTimeout(timer)
       try {
         const summary = await getJob(jobId)
         if (cancelled) return
@@ -117,15 +128,25 @@ export default function App() {
           setCars(solved)
           setStage('bursts')
         } else if (summary.status !== 'error') {
-          window.setTimeout(tick, 1200)
+          timer = window.setTimeout(tick, 1200)
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Lost contact with the local server')
       }
     }
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void tick()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+
     void tick()
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId])

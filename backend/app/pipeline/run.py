@@ -39,7 +39,12 @@ def run_pipeline(job: Job) -> None:
     try:
         job.status = "scanning"
         job.message = "Reading photos"
-        ingested = ingest_folder(job.folder)
+
+        def _ingest_progress(done: int, total: int) -> None:
+            job.message = f"Reading photos ({done}/{total})"
+            job.progress = 0.05 * done / max(total, 1)
+
+        ingested = ingest_folder(job.folder, on_progress=_ingest_progress)
         if not ingested:
             job.status = "error"
             job.error = "No photos found in that folder."

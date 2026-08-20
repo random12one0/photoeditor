@@ -7,6 +7,7 @@ reading straight from disk instead of a browser File.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -89,23 +90,33 @@ def read_header(path: Path) -> tuple[float, bool, tuple[int, int] | None]:
     return taken_at, approximate, size
 
 
-def ingest_folder(folder: Path) -> list[IngestedPhoto]:
+def ingest_folder(
+    folder: Path,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[IngestedPhoto]:
+    """`on_progress(done, total)` fires after every candidate file, `total`
+    fixed up front from a directory listing. Reading EXIF and hashing a
+    couple hundred photos is seconds, not instant -- without this the whole
+    ingest step reports nothing until it's entirely finished, which reads as
+    hung on a larger folder."""
+    candidates = [
+        e for e in sorted(folder.iterdir()) if e.is_file() and e.suffix.lower() in IMAGE_EXTENSIONS
+    ]
     photos: list[IngestedPhoto] = []
-    for entry in sorted(folder.iterdir()):
-        if not entry.is_file() or entry.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
+    for i, entry in enumerate(candidates):
         taken_at, approximate, size = read_header(entry)
-        if size is None:
-            continue
-        photos.append(
-            IngestedPhoto(
-                path=entry,
-                content_hash=_content_hash(entry),
-                width=size[0],
-                height=size[1],
-                taken_at=taken_at,
-                time_is_approximate=approximate,
+        if size is not None:
+            photos.append(
+                IngestedPhoto(
+                    path=entry,
+                    content_hash=_content_hash(entry),
+                    width=size[0],
+                    height=size[1],
+                    taken_at=taken_at,
+                    time_is_approximate=approximate,
+                )
             )
-        )
+        if on_progress:
+            on_progress(i + 1, len(candidates))
     photos.sort(key=lambda p: p.taken_at)
     return photos
