@@ -148,10 +148,19 @@ src/                                the existing Vite/React frontend, cut
                                      client hitting the backend above
 ```
 
-The frontend keeps its existing look and the wizard screens already
-sketched (Bursts, Pairs) — those get finished and adapted to pull data from
-the API instead of computing it in the browser, rather than rebuilt from
-scratch.
+**Correction, so this doc stays accurate:** an earlier cloud-sandbox session
+started sketching the four wizard screens (Bursts, Pairs, Leftovers, Export)
+and a client-side constraint-log/solver rewrite against the *browser-only*
+matcher, before this local-desktop direction was decided. Those in-progress
+edits were never committed and did not survive — `src/` on disk right now
+is still the shipped v1.5.0 browser app (`GroupsView`, `PairView`,
+`PairByHand`, `StyleView`, `ExportView`, `Group`/`Pair` types, client-side
+`hash.ts`/`features.ts`/`cluster.ts` matching). **Do not go looking for a
+`BurstsView.tsx` or a `Constraint` type — they don't exist.** The four-step
+wizard, the constraint log, and the API-client cutover described above are
+all still to be built, from the current v1.5.0 codebase as the starting
+point. The *design* carries over — everything above describes the intended
+shape — the code does not.
 
 ## Sequencing
 
@@ -163,11 +172,16 @@ scratch.
 3. **Backend pipeline**, built and tested stage by stage against a handful
    of your real jobs — embeddings and shortlisting first (cheap to verify),
    then geometric verification, then the full fusion + assignment.
-4. **Frontend cutover** — wire the wizard to the running backend, finish
-   the two screens not yet built (Leftovers, Export).
+4. **Frontend rewrite**, from the current v1.5.0 code: the constraint log
+   (`Constraint` union — pin/unpin/forbid/side/exclude/include/burstSplit/
+   burstMerge/represent, append-only, undo = pop), the pure `solveJob`
+   equivalent (now a backend call), and the four wizard screens — none of
+   which exist on disk yet (see the correction above).
 5. **Launcher scripts**, tested actually double-clicking them.
 6. **A real job, start to finish** — folder in, review, export, post.
 
 Nothing here is committed as working code yet. The three small backend
 scaffold files already in `backend/` (`requirements.txt`, `config.py`,
-`models.py`) are groundwork for step 3, not a finished implementation.
+`models.py`) are groundwork for step 3, not a finished implementation, and
+should be reviewed for fit before building on them rather than assumed
+correct.
