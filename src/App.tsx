@@ -48,6 +48,7 @@ export default function App() {
   const [files, setFiles] = useState<Map<string, File>>(new Map())
   const [preparingExport, setPreparingExport] = useState(false)
   const [browsing, setBrowsing] = useState(false)
+  const [checkingNow, setCheckingNow] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
@@ -101,15 +102,36 @@ export default function App() {
     }
   }, [])
 
+  // One status check, sharable between the automatic poll loop below and a
+  // manual "Check now" button -- the button exists because the automatic
+  // loop has now been seen to silently stop advancing in a real browser
+  // session (reported live: a job that had actually finished on the backend
+  // sat showing a stale "Reading photos (12/290)" indefinitely) without a
+  // reproducible cause -- worth a button that always works regardless of
+  // whatever a given browser is doing to the polling timer, rather than
+  // chasing the exact trigger further.
+  const checkJobNow = useCallback(async (): Promise<JobSummary | null> => {
+    if (!jobId) return null
+    try {
+      const summary = await getJob(jobId)
+      setJob(summary)
+      if (summary.status === 'ready') {
+        const [photos, solved] = await Promise.all([getPhotos(jobId), solveJob(jobId)])
+        setApiPhotos(photos)
+        setCars(solved)
+        setStage('bursts')
+      }
+      return summary
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Lost contact with the local server')
+      return null
+    }
+  }, [jobId])
+
   // Poll job status until the pipeline finishes, then load its solved cars.
-  //
   // Also re-checks the instant the tab regains focus/visibility, not just on
   // its own 1.2s timer -- a backgrounded tab gets its setTimeout throttled
-  // (sometimes to a stop) by the browser's power-saving behaviour, and
-  // without this a job that actually finished minutes ago while the tab sat
-  // in the background looks permanently stuck on "reading photos" until the
-  // page is manually reloaded. Reported exactly that way on a real 290-photo
-  // job that had, in fact, already finished server-side.
+  // (sometimes to a stop) by the browser's power-saving behaviour.
   useEffect(() => {
     if (!jobId || job?.status === 'ready' || job?.status === 'error') return
     let cancelled = false
@@ -117,21 +139,10 @@ export default function App() {
 
     const tick = async () => {
       window.clearTimeout(timer)
-      try {
-        const summary = await getJob(jobId)
-        if (cancelled) return
-        setJob(summary)
-        if (summary.status === 'ready') {
-          const [photos, solved] = await Promise.all([getPhotos(jobId), solveJob(jobId)])
-          if (cancelled) return
-          setApiPhotos(photos)
-          setCars(solved)
-          setStage('bursts')
-        } else if (summary.status !== 'error') {
-          timer = window.setTimeout(tick, 1200)
-        }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Lost contact with the local server')
+      const summary = await checkJobNow()
+      if (cancelled || !summary) return
+      if (summary.status !== 'ready' && summary.status !== 'error') {
+        timer = window.setTimeout(tick, 1200)
       }
     }
 
@@ -312,6 +323,20 @@ export default function App() {
                 <div className="bar" style={{ width: 260 }}>
                   <div className="bar-fill" style={{ width: `${Math.round(job.progress * 100)}%` }} />
                 </div>
+                <button
+                  className="btn ghost sm"
+                  disabled={checkingNow}
+                  onClick={() => {
+                    setCheckingNow(true)
+                    void checkJobNow().finally(() => setCheckingNow(false))
+                  }}
+                >
+                  {checkingNow ? 'Checking…' : 'Check now'}
+                </button>
+                <p className="tiny dim" style={{ textAlign: 'center', maxWidth: 320 }}>
+                  This updates on its own every couple seconds. If it looks
+                  stuck, "Check now" always asks the server directly.
+                </p>
               </>
             )}
           </div>
