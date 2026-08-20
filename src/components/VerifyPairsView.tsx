@@ -17,6 +17,21 @@ const TIER_LABEL: Record<string, string> = {
   uncertain: 'Uncertain',
 }
 
+/** "9:02 AM" for a same-day pair, with the date added if they span days --
+ * a double-check that the matcher didn't pair two photos taken hours or
+ * days apart, which visual similarity alone can't rule out. */
+function formatTakenAt(photo: ApiPhoto | undefined): string {
+  if (!photo) return ''
+  const d = new Date(photo.taken_at)
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return photo.time_is_approximate ? `${time} (approx.)` : time
+}
+
+function sameDay(a?: ApiPhoto, b?: ApiPhoto): boolean {
+  if (!a || !b) return true
+  return new Date(a.taken_at).toDateString() === new Date(b.taken_at).toDateString()
+}
+
 /**
  * Step 2: walk through the matcher's suggested before/after pairs. Confirm
  * pins it (locking it against being disturbed by a later edit); Reject
@@ -82,6 +97,7 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
           {rows.map(({ car, pair }) => {
             const before = photoById.get(pair.before_id)
             const after = photoById.get(pair.after_id)
+            const spansDays = !sameDay(before, after)
             return (
               <section key={pair.id} className="card">
                 <header className="card-head">
@@ -100,6 +116,7 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
                         style={{ width: '100%', borderRadius: 8, display: 'block' }}
                       />
                       <p className="tiny dim mono" style={{ marginTop: 4 }}>{before?.name}</p>
+                      <p className="tiny dim mono">{formatTakenAt(before)}</p>
                     </div>
                     <div style={{ flex: 1 }}>
                       <img
@@ -108,8 +125,14 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
                         style={{ width: '100%', borderRadius: 8, display: 'block' }}
                       />
                       <p className="tiny dim mono" style={{ marginTop: 4 }}>{after?.name}</p>
+                      <p className="tiny dim mono">{formatTakenAt(after)}</p>
                     </div>
                   </div>
+                  {spansDays && (
+                    <p className="tiny" style={{ color: 'var(--no, #e5484d)', marginTop: 6 }}>
+                      <Icon name="clock" size={12} /> These were taken on different days — worth a second look.
+                    </p>
+                  )}
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <button
                       className="btn ghost sm"

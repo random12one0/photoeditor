@@ -16,7 +16,7 @@ import math
 from app.jobs import CarData, Job, PhotoRecord
 from app.pipeline import neardup, timing
 from app.pipeline.bursts import BurstMember, group_bursts_transitive, same_take_evidence
-from app.pipeline.cleanliness import cleanliness_features
+from app.pipeline.cleanliness import cleanliness_features, looks_like_snow_foam
 from app.pipeline.embed import embed_photos
 from app.pipeline.ingest import ingest_folder
 from app.pipeline.score import fuse
@@ -64,7 +64,9 @@ def run_pipeline(job: Job) -> None:
         job.message = "Measuring sharpness"
         for p in ingested:
             feats = cleanliness_features(p.path)
-            job.photos[p.content_hash].quality = _quality_from_laplacian(feats.laplacian_variance)
+            record = job.photos[p.content_hash]
+            record.quality = _quality_from_laplacian(feats.laplacian_variance)
+            record.is_snow_foam = looks_like_snow_foam(feats)
         job.progress = 0.15
 
         job.status = "embedding"
@@ -84,9 +86,19 @@ def run_pipeline(job: Job) -> None:
 
         job.cars = []
         total_cars = max(1, len(cars_photos))
-        for car_idx, car_timed in enumerate(cars_photos):
+        for car_idx, car_timed_all in enumerate(cars_photos):
+            # Snow-foam "fun cannon" shots (config.SNOW_FOAM_*) never get
+            # offered as a before or after -- there's no real wash-progress
+            # partner for a car that's currently invisible under foam. They
+            # stay in job.photos (still exportable by hand) but drop out of
+            # every downstream step: bursts, pairing, orphans.
+            car_timed = [tp for tp in car_timed_all if not job.photos[tp.id].is_snow_foam]
             car_ids = [tp.id for tp in car_timed]
             car_photos = [job.photos[i] for i in car_ids]
+            if not car_photos:
+                # Every photo in this run of the timeline was a foam shot.
+                job.progress = 0.55 + 0.45 * (car_idx + 1) / total_cars
+                continue
 
             same_take: set[tuple[str, str]] = set()
             for i in range(len(car_timed)):
@@ -142,8 +154,11 @@ def run_pipeline(job: Job) -> None:
             )
             job.progress = 0.55 + 0.45 * (car_idx + 1) / total_cars
 
+        foam_count = sum(1 for p in job.photos.values() if p.is_snow_foam)
         job.status = "ready"
         job.message = f"{len(job.photos)} photos, {len(job.cars)} cars"
+        if foam_count:
+            job.message += f", {foam_count} foam shot{'s' if foam_count != 1 else ''} set aside"
         job.progress = 1.0
     except Exception as exc:  # pragma: no cover - surfaced to the UI, not swallowed
         job.status = "error"

@@ -82,3 +82,22 @@ MIN_JOB_GAP_SECONDS = 180  # under this, a car has no detected before/after job
 DEFAULT_SAME_SPOT_AUTO_ACCEPT = 0.85
 DEFAULT_SAME_SPOT_REVIEW_FLOOR = 0.55
 CALIBRATION_MIN_LABELS_FOR_ISOTONIC = 300
+
+# --- Snow-foam shots -------------------------------------------------------
+# A car fully coated in cannon foam (a fun/Instagram shot, not a wash step)
+# has no real "after" partner and shouldn't be offered as one. Unlike a
+# specular highlight -- a small glint off wet or glossy paint -- foam is a
+# large, contiguous, matte-white mass covering most of the frame: high
+# brightness and low saturation like a highlight, but over a much bigger
+# area, and *without* the sharp reflections a glossy panel throws (foam is
+# diffuse, so it kills environmental reflections rather than concentrating
+# them). Both conditions are required specifically to guard against bright
+# concrete/sky/pale-paint frames, which can hit one alone but rarely both at
+# these levels.
+#
+# Not yet checked against a real foam photo -- none turned up in the sample
+# job used to validate the rest of this pipeline. Same status as the
+# same-spot thresholds above: a documented default, not a measurement, and
+# worth revisiting the first time a real one is available.
+SNOW_FOAM_AREA_FRACTION = 0.4  # fraction of frame at V>0.85 & S<0.25
+SNOW_FOAM_MAX_SATURATION = 0.12  # whole-frame mean saturation ceiling
