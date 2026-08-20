@@ -39,13 +39,25 @@ SHORTLIST_FLOOR = 0.5  # cosine similarity
 SHORTLIST_TOP_K = 15
 
 # --- Geometric verification --------------------------------------------------
-# XFeat + LightGlueMatcher via kornia. Apache-2.0 — SuperPoint/SuperGlue
-# weights are never loaded anywhere in this codebase; that's a licensing
-# rule, not a cost-driven choice, and it doesn't change now that this runs
-# locally.
+# XFeat + its own bundled matcher (match_xfeat_star) via kornia, then
+# OpenCV RANSAC. Deviation from the original plan, found by testing rather
+# than assumed: kornia's LightGlueMatcher only has weights for
+# aliked/disk/superpoint/sift-family extractors (`known_modes`), not xfeat,
+# so it cannot consume XFeat descriptors. XFeat's own matcher is part of the
+# same Apache-2.0 package and gives the same kind of evidence (RANSAC inlier
+# count). Still no SuperPoint/SuperGlue weights anywhere.
 VERIFY_LONG_EDGE = 1024
 RANSAC_REPROJ_THRESHOLD = 4.0
 LOWE_RATIO = 0.82
+
+# Checked against real photos from a live job folder (2026-08-19 local
+# session): a genuine before/after pair (same trunk, debris vs vacuumed)
+# scored 60-313 inliers across 4 sampled pairs; unrelated pairs from the same
+# folder scored 5-11. 20 sits in the gap, close to the unrelated side since
+# the sample is still small (same "don't trust a single small label set"
+# caution as hash.ts's FEATURE_MIN_INLIERS) — revisit once LabView judgements
+# accumulate.
+VERIFY_MIN_INLIERS = 20
 
 # --- Burst grouping ------------------------------------------------------
 # 8s default per the matching spec, falling back to 20s when sub-second EXIF

@@ -13,3 +13,10 @@ test/fixtures/samecar/
 test/fixtures/collages/
 tsconfig.tsbuildinfo
 dist-single/
+
+# Python backend
+backend/.venv/
+backend/**/__pycache__/
+*.pyc
+backend/.pytest_cache/
+
