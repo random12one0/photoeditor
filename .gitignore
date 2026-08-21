@@ -20,3 +20,7 @@ backend/**/__pycache__/
 *.pyc
 backend/.pytest_cache/
 
+# PyInstaller build output -- multi-GB, and rebuilt from BeforeAndAfter.spec
+build_exe/
+dist_exe/
+

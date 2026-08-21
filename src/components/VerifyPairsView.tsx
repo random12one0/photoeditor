@@ -1,6 +1,9 @@
+import type { CSSProperties } from 'react'
 import { useMemo, useState } from 'react'
 import type { ApiCarSolution, ApiPhoto, ConstraintIn } from '../lib/api'
 import { imageUrl } from '../lib/api'
+import type { PhotoTransform } from '../lib/transform'
+import { IDENTITY_TRANSFORM } from '../lib/transform'
 import Icon from './Icon'
 
 interface Props {
@@ -8,6 +11,8 @@ interface Props {
   cars: ApiCarSolution[]
   photoById: Map<string, ApiPhoto>
   onConstraint: (c: ConstraintIn) => Promise<void>
+  transforms: Map<string, PhotoTransform>
+  onSetTransform: (photoId: string, patch: Partial<PhotoTransform>) => void
   onNext: () => void
 }
 
@@ -32,14 +37,95 @@ function sameDay(a?: ApiPhoto, b?: ApiPhoto): boolean {
   return new Date(a.taken_at).toDateString() === new Date(b.taken_at).toDateString()
 }
 
+/** CSS approximation of transform.ts's canvas transform, for an instant
+ * preview here -- the pixel-accurate version only gets computed (fetch +
+ * decode + re-encode) once the photo actually needs to render, in Style or
+ * Export. A rotated 90/270 preview overflows its box a little rather than
+ * resizing the box to match; good enough to judge the edit by. */
+function previewStyle(t: PhotoTransform): CSSProperties {
+  return {
+    width: '100%',
+    borderRadius: 8,
+    display: 'block',
+    objectFit: 'cover',
+    aspectRatio: t.rotate === 90 || t.rotate === 270 ? '3 / 4' : '4 / 3',
+    transform: `rotate(${t.rotate}deg) scaleX(${t.flipH ? -1 : 1}) scale(${t.zoom})`,
+    transition: 'transform 0.12s ease-out',
+  }
+}
+
+function PhotoEditControls({
+  transform,
+  onChange,
+}: {
+  transform: PhotoTransform
+  onChange: (patch: Partial<PhotoTransform>) => void
+}) {
+  const isEdited = transform.rotate !== 0 || transform.flipH || transform.zoom !== 1
+  return (
+    <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
+      <button
+        className="btn ghost sm"
+        style={{ fontSize: '0.7rem', padding: '4px 6px' }}
+        title="Rotate 90°"
+        onClick={() => onChange({ rotate: ((transform.rotate + 90) % 360) as PhotoTransform['rotate'] })}
+      >
+        <Icon name="undo" size={13} />
+      </button>
+      <button
+        className="btn ghost sm"
+        style={{ fontSize: '0.7rem', padding: '4px 6px' }}
+        title="Mirror"
+        onClick={() => onChange({ flipH: !transform.flipH })}
+      >
+        <Icon name="swap" size={13} />
+      </button>
+      <input
+        type="range"
+        min={1}
+        max={2.5}
+        step={0.05}
+        value={transform.zoom}
+        onChange={(e) => onChange({ zoom: Number(e.target.value) })}
+        title="Zoom"
+        style={{ flex: 1 }}
+      />
+      {isEdited && (
+        <button
+          className="btn ghost sm"
+          style={{ fontSize: '0.65rem', padding: '4px 6px' }}
+          title="Reset this photo's edits"
+          onClick={() => onChange(IDENTITY_TRANSFORM)}
+        >
+          Reset
+        </button>
+      )}
+    </div>
+  )
+}
+
 /**
  * Step 2: walk through the matcher's suggested before/after pairs. Confirm
  * pins it (locking it against being disturbed by a later edit); Reject
  * forbids that exact combination and re-solves, which frees both photos --
  * the same "not a pair falls through to the next candidate" behaviour the
  * browser prototype had, just server-side now (pipeline/solver.py).
+ *
+ * Rotate/mirror/zoom here is a quick correction, previewed with a CSS
+ * transform for instant feedback; the same edit also applies wherever this
+ * photo shows up later (Style's live preview, the final export) because
+ * it's stored by photo id in one shared place (App.tsx's `transforms`,
+ * baked in by lib/photoAdapter.ts), not duplicated per screen.
  */
-export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, onNext }: Props) {
+export default function VerifyPairsView({
+  jobId,
+  cars,
+  photoById,
+  onConstraint,
+  transforms,
+  onSetTransform,
+  onNext,
+}: Props) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<string | null>(null)
   const [swapping, setSwapping] = useState<{ pairId: string; side: 'before' | 'after' } | null>(null)
@@ -118,6 +204,8 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
             const before = photoById.get(pair.before_id)
             const after = photoById.get(pair.after_id)
             const spansDays = !sameDay(before, after)
+            const beforeT = transforms.get(pair.before_id) ?? IDENTITY_TRANSFORM
+            const afterT = transforms.get(pair.after_id) ?? IDENTITY_TRANSFORM
             return (
               <section key={pair.id} className="card">
                 <header className="card-head">
@@ -129,14 +217,16 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
                 </header>
                 <div className="card-body">
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <img
-                        src={imageUrl(jobId, pair.before_id)}
-                        alt={before?.name}
-                        style={{ width: '100%', borderRadius: 8, display: 'block' }}
-                      />
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <div style={{ overflow: 'hidden', borderRadius: 8 }}>
+                        <img src={imageUrl(jobId, pair.before_id)} alt={before?.name} style={previewStyle(beforeT)} />
+                      </div>
                       <p className="tiny dim mono" style={{ marginTop: 4 }}>{before?.name}</p>
                       <p className="tiny dim mono">{formatTakenAt(before)}</p>
+                      <PhotoEditControls
+                        transform={beforeT}
+                        onChange={(patch) => onSetTransform(pair.before_id, patch)}
+                      />
                       <button
                         className="btn ghost sm"
                         style={{ marginTop: 4, width: '100%', fontSize: '0.7rem' }}
@@ -150,14 +240,16 @@ export default function VerifyPairsView({ jobId, cars, photoById, onConstraint, 
                         <Icon name="swap" size={13} /> Replace before
                       </button>
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <img
-                        src={imageUrl(jobId, pair.after_id)}
-                        alt={after?.name}
-                        style={{ width: '100%', borderRadius: 8, display: 'block' }}
-                      />
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <div style={{ overflow: 'hidden', borderRadius: 8 }}>
+                        <img src={imageUrl(jobId, pair.after_id)} alt={after?.name} style={previewStyle(afterT)} />
+                      </div>
                       <p className="tiny dim mono" style={{ marginTop: 4 }}>{after?.name}</p>
                       <p className="tiny dim mono">{formatTakenAt(after)}</p>
+                      <PhotoEditControls
+                        transform={afterT}
+                        onChange={(patch) => onSetTransform(pair.after_id, patch)}
+                      />
                       <button
                         className="btn ghost sm"
                         style={{ marginTop: 4, width: '100%', fontSize: '0.7rem' }}

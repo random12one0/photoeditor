@@ -7,6 +7,7 @@
  */
 
 import type { ClusterSettings, Group, Photo, SavedPreset, StylePreset } from '../types'
+import type { PhotoTransform } from './transform'
 
 /* Deliberately not renamed with the app.
  *
@@ -249,5 +250,29 @@ export function loadSavedPresets(): SavedPreset[] {
     return Array.isArray(parsed) ? (parsed as SavedPreset[]) : []
   } catch {
     return []
+  }
+}
+
+const TRANSFORMS_KEY = 'unbklok:transforms'
+
+/** Per-photo rotate/flip/zoom corrections, keyed by photo id (a content
+ * hash) -- stable across re-running the same folder, so an edit made once
+ * survives a re-run of the same job. */
+export function saveTransforms(map: Map<string, PhotoTransform>): void {
+  try {
+    localStorage.setItem(TRANSFORMS_KEY, JSON.stringify(Object.fromEntries(map)))
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadTransforms(): Map<string, PhotoTransform> {
+  try {
+    const raw = localStorage.getItem(TRANSFORMS_KEY)
+    if (!raw) return new Map()
+    const parsed = JSON.parse(raw) as Record<string, PhotoTransform>
+    return new Map(Object.entries(parsed))
+  } catch {
+    return new Map()
   }
 }

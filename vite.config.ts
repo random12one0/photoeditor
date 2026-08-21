@@ -47,11 +47,21 @@ export default defineConfig({
     format: 'es',
   },
   server: {
+    // Explicit IPv4, not "localhost" -- Node resolves that to the IPv6
+    // loopback first on this machine, which left the dev server unreachable
+    // at the IPv4 address every other tool here (curl, the browser pane,
+    // the backend's own CORS allowlist) actually uses.
+    host: '127.0.0.1',
     // Only used by `npm run dev` -- the shipped launcher serves the built
     // frontend from the same FastAPI process the API lives on, so there's
     // no cross-origin request to proxy there.
     proxy: {
       '/api': 'http://127.0.0.1:8420',
+    },
+    watch: {
+      // PyInstaller's own build output -- not frontend source, but it lives
+      // under the repo root and was triggering spurious HMR reloads.
+      ignored: ['**/build_exe/**', '**/dist_exe/**'],
     },
   },
 })

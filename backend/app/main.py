@@ -5,6 +5,7 @@ once the frontend is built, the built static site at /."""
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -39,6 +40,11 @@ def health() -> dict:
     return {"ok": True, "cuda": torch.cuda.is_available()}
 
 
-_frontend_dist = Path(__file__).resolve().parent.parent.parent / "dist"
+if getattr(sys, "frozen", False):
+    # PyInstaller (onedir): bundled data sits next to the exe, under
+    # sys._MEIPASS, not three parents up from this file's own location.
+    _frontend_dist = Path(sys._MEIPASS) / "dist"  # type: ignore[attr-defined]
+else:
+    _frontend_dist = Path(__file__).resolve().parent.parent.parent / "dist"
 if _frontend_dist.is_dir():
     app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")

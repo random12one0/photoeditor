@@ -19,10 +19,12 @@ import {
   undoLastConstraint as apiUndoLast,
 } from './lib/api'
 import type { ApiCarSolution, ApiPhoto, ConstraintIn, JobSummary } from './lib/api'
-import { loadPreset, loadSavedPresets, savePreset, saveSavedPresets } from './lib/db'
+import { loadPreset, loadSavedPresets, loadTransforms, savePreset, saveSavedPresets, saveTransforms } from './lib/db'
 import { buildGroups, buildPhotoMap } from './lib/photoAdapter'
 import { DEFAULT_PRESET } from './lib/render'
-import type { SavedPreset, StylePreset } from './types'
+import type { PhotoTransform } from './lib/transform'
+import { IDENTITY_TRANSFORM } from './lib/transform'
+import type { Photo, SavedPreset, StylePreset } from './types'
 
 export type Stage = 'choose' | 'bursts' | 'verify' | 'leftovers' | 'style' | 'export'
 
@@ -47,6 +49,7 @@ export default function App() {
   const [apiPhotos, setApiPhotos] = useState<ApiPhoto[]>([])
   const [cars, setCars] = useState<ApiCarSolution[]>([])
   const [files, setFiles] = useState<Map<string, File>>(new Map())
+  const [transforms, setTransforms] = useState<Map<string, PhotoTransform>>(() => loadTransforms())
   const [preparingExport, setPreparingExport] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [checkingNow, setCheckingNow] = useState(false)
@@ -69,6 +72,15 @@ export default function App() {
 
   useEffect(() => savePreset(preset), [preset])
   useEffect(() => saveSavedPresets(savedPresets), [savedPresets])
+  useEffect(() => saveTransforms(transforms), [transforms])
+
+  const setPhotoTransform = useCallback((photoId: string, patch: Partial<PhotoTransform>) => {
+    setTransforms((prev) => {
+      const next = new Map(prev)
+      next.set(photoId, { ...(prev.get(photoId) ?? IDENTITY_TRANSFORM), ...patch })
+      return next
+    })
+  }, [])
 
   // Reattach to a job by id from the URL (?job=...) -- lets a reload pick
   // back up instead of losing the whole session, and gives the folder-pick
@@ -219,10 +231,21 @@ export default function App() {
   }, [jobId, apiPhotos, notify])
 
   const groups = useMemo(() => buildGroups(cars), [cars])
-  const photoMap = useMemo(
-    () => buildPhotoMap(apiPhotos, jobId ?? '', files),
-    [apiPhotos, jobId, files],
-  )
+
+  // buildPhotoMap is async -- baking a rotate/flip/zoom correction into a
+  // photo's proxyUrl/file (transform.ts) needs a fetch+decode+re-encode
+  // round trip, but only for photos actually edited; everything else is
+  // still effectively synchronous.
+  const [photoMap, setPhotoMap] = useState<Map<string, Photo>>(new Map())
+  useEffect(() => {
+    let cancelled = false
+    void buildPhotoMap(apiPhotos, jobId ?? '', files, transforms).then((map) => {
+      if (!cancelled) setPhotoMap(map)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [apiPhotos, jobId, files, transforms])
 
   const savePresetAs = useCallback(
     (name: string) => {
@@ -362,7 +385,15 @@ export default function App() {
         <BurstsView jobId={jobId} cars={cars} photoById={photoById} onConstraint={applyConstraint} onNext={() => setStage('verify')} />
       )}
       {stage === 'verify' && jobId && (
-        <VerifyPairsView jobId={jobId} cars={cars} photoById={photoById} onConstraint={applyConstraint} onNext={() => setStage('leftovers')} />
+        <VerifyPairsView
+          jobId={jobId}
+          cars={cars}
+          photoById={photoById}
+          onConstraint={applyConstraint}
+          transforms={transforms}
+          onSetTransform={setPhotoTransform}
+          onNext={() => setStage('leftovers')}
+        />
       )}
       {stage === 'leftovers' && jobId && (
         <LeftoversView jobId={jobId} cars={cars} photoById={photoById} onConstraint={applyConstraint} onNext={() => void enterStyle()} />

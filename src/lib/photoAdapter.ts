@@ -11,18 +11,25 @@
  * fields on Photo (dhash, colorSig, chromaSig, ...) are dead weight here --
  * nothing in the renderer or exporter reads them -- so they're filled with
  * inert placeholders rather than recomputed.
+ *
+ * Per-photo rotate/flip/zoom (transform.ts) is applied here too, for the
+ * same reason: baking the correction into proxyUrl/file before render.ts or
+ * exporter.ts ever sees the photo means neither of them needs to know
+ * transforms exist.
  */
 
 import type { ApiCarSolution, ApiPhoto } from './api'
 import { imageUrl } from './api'
+import type { PhotoTransform } from './transform'
+import { applyTransformToFile, applyTransformToUrl, isIdentity } from './transform'
 import type { Group, Pair, Photo } from '../types'
 
-function placeholderPhoto(p: ApiPhoto, jobId: string, file: File | null): Photo {
+function placeholderPhoto(p: ApiPhoto, proxyUrl: string, file: File | null): Photo {
   return {
     id: p.id,
     file: file as File, // only read by exporter.ts at export time, where it's always real
     name: p.name,
-    proxyUrl: imageUrl(jobId, p.id),
+    proxyUrl,
     width: p.width,
     height: p.height,
     takenAt: p.taken_at,
@@ -39,12 +46,34 @@ function placeholderPhoto(p: ApiPhoto, jobId: string, file: File | null): Photo 
   }
 }
 
-export function buildPhotoMap(
+/** Async because a photo carrying a non-identity transform needs a fetch +
+ * decode + re-encode round trip (transform.ts) before it can be handed off
+ * -- but that only happens for photos actually edited, everything else
+ * takes the same synchronous path as before. */
+export async function buildPhotoMap(
   apiPhotos: ApiPhoto[],
   jobId: string,
   files?: Map<string, File>,
-): Map<string, Photo> {
-  return new Map(apiPhotos.map((p) => [p.id, placeholderPhoto(p, jobId, files?.get(p.id) ?? null)]))
+  transforms?: Map<string, PhotoTransform>,
+): Promise<Map<string, Photo>> {
+  const entries = await Promise.all(
+    apiPhotos.map(async (p) => {
+      const t = transforms?.get(p.id)
+      const rawUrl = imageUrl(jobId, p.id)
+      const rawFile = files?.get(p.id) ?? null
+
+      if (!t || isIdentity(t)) {
+        return [p.id, placeholderPhoto(p, rawUrl, rawFile)] as const
+      }
+
+      const [proxyUrl, file] = await Promise.all([
+        applyTransformToUrl(rawUrl, t),
+        rawFile ? applyTransformToFile(rawFile, t) : Promise.resolve(null),
+      ])
+      return [p.id, placeholderPhoto(p, proxyUrl, file)] as const
+    }),
+  )
+  return new Map(entries)
 }
 
 /** Only confirmed pairs (tier 'confirmed' or explicitly pinned) render/export
