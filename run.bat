@@ -4,7 +4,9 @@ cd /d "%~dp0"
 
 echo Before ^& After -- starting up...
 
-set VENV_PY=backend\.venv\Scripts\python.exe
+REM Absolute, not relative -- this needs to keep working after the `pushd
+REM backend` below changes the current directory for launching app.desktop.
+set VENV_PY=%~dp0backend\.venv\Scripts\python.exe
 
 if not exist "%VENV_PY%" (
     echo Setting up the Python environment for the first time -- this happens once.
@@ -29,10 +31,13 @@ if not exist "%VENV_PY%" (
     ) else (
         echo No NVIDIA GPU detected -- installing the CPU build of PyTorch. Matching will be slower.
     )
-
-    echo Installing the rest of the backend...
-    "%VENV_PY%" -m pip install -r backend\requirements.txt
 )
+
+REM Always re-check requirements, not just on first setup -- pip skips
+REM anything already satisfied in a couple seconds, and it means a
+REM requirements.txt change (like adding pywebview) actually reaches an
+REM existing install instead of silently never being applied.
+"%VENV_PY%" -m pip install -q -r backend\requirements.txt
 
 if not exist "dist\index.html" (
     where npm >nul 2>nul
@@ -46,8 +51,9 @@ if not exist "dist\index.html" (
     call npm run build
 )
 
-echo Starting the local server on http://127.0.0.1:8420 ...
-start "" http://127.0.0.1:8420/
-"%VENV_PY%" -m uvicorn app.main:app --host 127.0.0.1 --port 8420 --app-dir backend
+echo Opening Before ^& After...
+pushd "%~dp0backend"
+"%VENV_PY%" -m app.desktop
+popd
 
 endlocal

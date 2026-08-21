@@ -22,3 +22,9 @@ exifread>=3.0,<4
 fastapi>=0.111,<1
 uvicorn[standard]>=0.29,<1
 python-multipart>=0.0.9,<1
+
+# Native window (app/desktop.py) instead of a browser tab. On Windows this
+# uses Edge's WebView2 engine via pythonnet, which pip pulls in
+# automatically -- WebView2 itself ships with any modern Windows 10/11
+# (it's part of Edge), so nothing extra to install there.
+pywebview>=6.0,<7

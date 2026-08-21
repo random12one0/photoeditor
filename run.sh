@@ -7,7 +7,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 echo "Before & After -- starting up..."
 
-VENV_PY="backend/.venv/bin/python"
+ROOT="$(pwd)"
+VENV_PY="$ROOT/backend/.venv/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then
     echo "Setting up the Python environment for the first time -- this happens once."
@@ -27,6 +28,11 @@ if [ ! -x "$VENV_PY" ]; then
     "$VENV_PY" -m pip install -r backend/requirements.txt
 fi
 
+# Always re-check, not just on first setup -- pip skips anything already
+# satisfied in a couple seconds, and it means a requirements.txt change
+# (like adding pywebview) actually reaches an existing install.
+"$VENV_PY" -m pip install -q -r backend/requirements.txt
+
 if [ ! -f "dist/index.html" ]; then
     command -v npm >/dev/null 2>&1 || {
         echo "npm was not found on PATH. Install Node.js from nodejs.org, then run this again."
@@ -37,11 +43,12 @@ if [ ! -f "dist/index.html" ]; then
     npm run build
 fi
 
-echo "Starting the local server on http://127.0.0.1:8420 ..."
-( sleep 1.5
-  if command -v open >/dev/null 2>&1; then open http://127.0.0.1:8420/
-  elif command -v xdg-open >/dev/null 2>&1; then xdg-open http://127.0.0.1:8420/
-  fi
-) &
-
-exec "$VENV_PY" -m uvicorn app.main:app --host 127.0.0.1 --port 8420 --app-dir backend
+echo "Opening Before & After..."
+# app/desktop.py opens a native window via pywebview instead of a browser
+# tab. On macOS this needs PyObjC (pulled in by pywebview's own deps); on
+# Linux it needs a GTK+WebKit2 stack that isn't always present out of the
+# box (`pip install pywebview[gtk]` plus your distro's webkit2gtk package).
+# Windows is the tested platform (WebView2 ships with Edge); this hasn't
+# been run on Mac or Linux.
+cd "$ROOT/backend"
+exec "$VENV_PY" -m app.desktop
