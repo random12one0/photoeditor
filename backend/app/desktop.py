@@ -33,6 +33,7 @@ import urllib.request
 import uvicorn
 import webview
 
+from app import desktop_state
 from app.config import CACHE_DIR
 from app.main import app
 
@@ -121,7 +122,7 @@ def main() -> None:
         return
 
     try:
-        webview.create_window(
+        desktop_state.window = webview.create_window(
             "Before & After",
             f"http://{HOST}:{PORT}/",
             width=1320,
