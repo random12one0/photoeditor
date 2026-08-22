@@ -122,6 +122,16 @@ def main() -> None:
         return
 
     try:
+        # Off by default in pywebview -- the Windows/WebView2 backend
+        # cancels every download unless this is explicitly turned on
+        # (checked directly in its source: on_download_starting() sets
+        # args.Cancel = True when this is False). Without it, the whole
+        # point of the Export step -- saving the ZIP -- would silently do
+        # nothing: no error, no file, no sign anything was wrong. Allowing
+        # it makes WebView2 show its own native Save-As dialog per file,
+        # the same "ask where to save" behaviour a browser has by default.
+        webview.settings["ALLOW_DOWNLOADS"] = True
+
         desktop_state.window = webview.create_window(
             "Before & After",
             f"http://{HOST}:{PORT}/",
