@@ -20,7 +20,7 @@ import {
 } from './lib/api'
 import type { ApiCarSolution, ApiPhoto, ConstraintIn, JobSummary } from './lib/api'
 import { loadPreset, loadSavedPresets, loadTransforms, savePreset, saveSavedPresets, saveTransforms } from './lib/db'
-import { buildGroups, buildPhotoMap } from './lib/photoAdapter'
+import { buildGroups, buildPhotoMap, buildPhotoMapSync, hasAnyTransform } from './lib/photoAdapter'
 import { DEFAULT_PRESET } from './lib/render'
 import type { PhotoTransform } from './lib/transform'
 import { IDENTITY_TRANSFORM } from './lib/transform'
@@ -232,12 +232,22 @@ export default function App() {
 
   const groups = useMemo(() => buildGroups(cars), [cars])
 
-  // buildPhotoMap is async -- baking a rotate/flip/zoom correction into a
-  // photo's proxyUrl/file (transform.ts) needs a fetch+decode+re-encode
-  // round trip, but only for photos actually edited; everything else is
-  // still effectively synchronous.
-  const [photoMap, setPhotoMap] = useState<Map<string, Photo>>(new Map())
+  // Synchronous fast path first, always -- correct immediately for the
+  // common case (nothing has been rotated/flipped/zoomed), no flash of an
+  // empty Style preview while an unnecessary async round trip settles. Only
+  // when a transform is actually in play does the async path (baking the
+  // correction into a fetched/decoded/re-encoded proxyUrl or File -- see
+  // transform.ts) get invoked, and its result then overwrites the base map.
+  const basePhotoMap = useMemo(
+    () => buildPhotoMapSync(apiPhotos, jobId ?? '', files),
+    [apiPhotos, jobId, files],
+  )
+  const [photoMap, setPhotoMap] = useState<Map<string, Photo>>(basePhotoMap)
   useEffect(() => {
+    if (!hasAnyTransform(apiPhotos, transforms)) {
+      setPhotoMap(basePhotoMap)
+      return
+    }
     let cancelled = false
     void buildPhotoMap(apiPhotos, jobId ?? '', files, transforms).then((map) => {
       if (!cancelled) setPhotoMap(map)
@@ -245,7 +255,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [apiPhotos, jobId, files, transforms])
+  }, [basePhotoMap, apiPhotos, jobId, files, transforms])
 
   const savePresetAs = useCallback(
     (name: string) => {

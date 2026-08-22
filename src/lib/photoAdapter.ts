@@ -46,10 +46,35 @@ function placeholderPhoto(p: ApiPhoto, proxyUrl: string, file: File | null): Pho
   }
 }
 
+/** No transform work at all -- every photo takes the plain synchronous
+ * path. This is the common case (most photos are never edited) and the
+ * only one that can run inside a plain useMemo: an async function, even
+ * one that resolves instantly, still defers its result to the next
+ * microtask, which means at least one extra render with a stale/empty map.
+ * Measured the difference directly: routing every photo through
+ * buildPhotoMap's async path (below) added a real, visible delay before
+ * the Style preview appeared, for zero benefit when nothing was edited. */
+export function buildPhotoMapSync(
+  apiPhotos: ApiPhoto[],
+  jobId: string,
+  files?: Map<string, File>,
+): Map<string, Photo> {
+  return new Map(
+    apiPhotos.map((p) => [p.id, placeholderPhoto(p, imageUrl(jobId, p.id), files?.get(p.id) ?? null)]),
+  )
+}
+
+export function hasAnyTransform(apiPhotos: ApiPhoto[], transforms: Map<string, PhotoTransform>): boolean {
+  return apiPhotos.some((p) => {
+    const t = transforms.get(p.id)
+    return t && !isIdentity(t)
+  })
+}
+
 /** Async because a photo carrying a non-identity transform needs a fetch +
- * decode + re-encode round trip (transform.ts) before it can be handed off
- * -- but that only happens for photos actually edited, everything else
- * takes the same synchronous path as before. */
+ * decode + re-encode round trip (transform.ts) before it can be handed off.
+ * Only worth calling when hasAnyTransform() is true -- see buildPhotoMapSync
+ * for why the common (nothing edited) case takes a different path. */
 export async function buildPhotoMap(
   apiPhotos: ApiPhoto[],
   jobId: string,
